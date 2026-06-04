@@ -1,0 +1,76 @@
+part of 'route_navigator.dart';
+
+class {prefix}BaseNavigator {
+  // ==================== Utility ====================
+  /// go native
+  Future<T?> goNative<T>(String? url) {
+    return jumpManager.jump<T>(url);
+  }
+
+  /// go back
+  void goBack<T>({T? result, bool closeOverlays = false, bool canPop = true, int? id}) {
+    _goBack<T>(result: result, closeOverlays: closeOverlays, canPop: canPop, id: id);
+  }
+
+  /// go back until
+  void goBackUntil(String page) {
+    _getOffNamed(page);
+  }
+
+  /// is current page
+  bool isCurrentPage(String page) {
+    return _isCurrentPage(page);
+  }
+}
+
+void _goBack<T>({T? result, bool closeOverlays = false, bool canPop = true, int? id}) {
+  FLXGetxUtils.hideLoading();
+  Get.back<T>(result: result, closeOverlays: closeOverlays, canPop: canPop, id: id);
+}
+
+Future<T?> _offNamedUntil<T>(String newRouteName, {int? id, dynamic arguments, Map<String, String>? parameters}) {
+  FLXGetxUtils.hideLoading();
+  Future<T?>? rtn = Get.offNamedUntil(newRouteName, ModalRoute.withName(""), id: id, arguments: arguments, parameters: parameters);
+  if (rtn != null) {
+    return rtn;
+  }
+  logD('received null instance! like router duplicates! <_offUntil:$newRouteName>');
+  return Future.error(FLXAppError.routerError());
+}
+
+Future<T?> _getToNamed<T>(String newRouteName, {dynamic arguments, int? id, bool preventDuplicates = false, Map<String, String>? parameters}) {
+  FLXGetxUtils.hideLoading();
+  Future<T?>? rtn = Get.toNamed<T>(newRouteName, arguments: arguments, id: id, preventDuplicates: preventDuplicates, parameters: parameters);
+  if (rtn != null) {
+    return rtn;
+  }
+  logD('received null instance! like router duplicates! <_getToNamed:$newRouteName>');
+  return Future.error(FLXAppError.routerError());
+}
+
+Future<T?> _getOffNamed<T>(String newRouteName, {dynamic arguments, int? id, bool preventDuplicates = true, Map<String, String>? parameters}) {
+  FLXGetxUtils.hideLoading();
+  Future<T?>? rtn = Get.offNamed<T>(newRouteName, arguments: arguments, id: id, preventDuplicates: preventDuplicates, parameters: parameters);
+  if (rtn != null) {
+    return rtn;
+  }
+  logD('received null instance! like router duplicates! <_getOffAllNamed:$newRouteName>');
+  return Future.value();
+}
+
+Future<T?> _getOffAllNamed<T>(String newRouteName, {RoutePredicate? predicate, dynamic arguments, int? id, Map<String, String>? parameters}) {
+  FLXGetxUtils.hideLoading();
+  Future<T?>? rtn = Get.offAllNamed<T>(newRouteName, predicate: predicate, arguments: arguments, id: id, parameters: parameters);
+  if (rtn != null) {
+    return rtn;
+  }
+  logD('received null instance! like router duplicates! <_getOffAllNamed:$newRouteName>');
+  return Future.value();
+}
+
+bool _isCurrentPage(String page) {
+  if (Get.currentRoute == page) {
+    return true;
+  }
+  return false;
+}

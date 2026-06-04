@@ -1,0 +1,22 @@
+syntax = "v1"
+
+type (
+    // 登出请求
+    LogoutReq {
+        // None
+    }
+)
+
+type (
+    // 通用响应
+    CommonResp {
+        Code    int64  `json:"code"`
+        Message string `json:"message"`
+    }
+)
+
+service fastkeyboard-api {
+    @doc "登出"
+    @handler Logout
+    post /ifk/logout (LogoutReq) returns (CommonResp)
+}

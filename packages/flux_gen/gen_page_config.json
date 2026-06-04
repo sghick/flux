@@ -1,0 +1,16 @@
+{
+  "main_tab": "/main_tab",
+  "pages": [
+    "home /home",
+    "tab1 /tab1",
+    "tab2 /tab2",
+    "me /me",
+    "web /others/web"
+  ],
+  "tabOrder": [
+    "home",
+    "tab1",
+    "tab2",
+    "me"
+  ]
+}

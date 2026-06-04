@@ -1,0 +1,23 @@
+import 'package:{package}/common/styles/color_style.dart';
+import 'package:{package}/common/widgets/scaffold/scaffold.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
+import '{name}_logic.dart';
+
+class {prefix}{Name}Page extends StatefulWidget {
+  const {prefix}{Name}Page({super.key});
+
+  @override
+  State<{prefix}{Name}Page> createState => _{prefix}{Name}PageState();
+}
+
+class _{prefix}{Name}PageState extends State<{prefix}{Name}Page> with {prefix}{Name}LogicMixin {
+  @override
+  Widget build(BuildContext context) {
+    return IFKScaffold(
+      backgroundColor: IFKColorStyles.surface,
+      body: Container(),
+    );
+  }
+}

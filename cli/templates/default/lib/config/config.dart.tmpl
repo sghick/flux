@@ -1,0 +1,11 @@
+class AppConfig {
+  final String host;
+  final String appName;
+
+  const AppConfig({
+    this.host = '{{host}}',
+    this.appName = '{{app_name}}',
+  });
+
+  static const AppConfig current = AppConfig();
+}
