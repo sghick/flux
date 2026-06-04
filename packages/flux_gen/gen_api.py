@@ -610,9 +610,9 @@ class ApiCodeGenerator:
 
         lines = []
 
-        lines.append("import 'package:flux_core/generic_api.dart';")
-        lines.append(f"import 'package:{self.config.package_name}/common/net/api/apis.dart';")
-        lines.append(f"import 'package:{self.config.package_name}/common/net/client/api_options.dart';")
+        lines.append("import 'package:flux_core/flux_core.dart';")
+        lines.append("import './apis.dart';")
+        lines.append("import '../client/api_options.dart';")
         lines.append(f"import '../models/json/{api_file.module_name}_model.dart';")
 
         # 收集需要导入的其他模块类型
@@ -703,8 +703,8 @@ class ApiCodeGenerator:
         if response_type:
             # 检查是否在当前模块生成的 models 中，或在其他模块中
             if response_type in generated_models or response_type in self.type_to_module:
-                return f"IFKGeneralApi<{response_type}>"
-        return "IFKGeneralApi<dynamic>"
+                return f"FLXGeneralApi<{response_type}>"
+        return f"FLXGeneralApi<dynamic>"
 
     def _generate_method_params(self, endpoint: ApiEndpoint, api_file: ApiFile) -> str:
         """生成方法参数"""
@@ -730,8 +730,8 @@ class ApiCodeGenerator:
         """生成方法体"""
         lines = []
 
-        method_enum = f"IFKApiMethod.{endpoint.method.lower()}"
-        api_constant = f"IFKApis.{self._to_snake_case(endpoint.handler)}"
+        method_enum = f"FLXApiMethod.{endpoint.method.lower()}"
+        api_constant = f"{self.config.api_prefix}Apis.{self._to_snake_case(endpoint.handler)}"
 
         # 检查是否有请求体字段
         has_body_fields = False
@@ -752,20 +752,20 @@ class ApiCodeGenerator:
         # 生成 options
         if endpoint.response_type:
             response_type = self._get_prefixed_name(endpoint.response_type)
-            lines.append(f"final options = IFKCustomApiOptions(")
+            lines.append(f"final options = FLXCustomApiOptions(")
             lines.append(f"  {method_enum},")
             lines.append(f"  {api_constant},")
             if has_body_fields:
                 lines.append("  data: data,")
-            lines.append(f"  typeParser: IFKTypeParser.single((json) => {response_type}.fromJson(json)),")
+            lines.append(f"  typeParser: FLXTypeParser.single((json) => {response_type}.fromJson(json)),")
             lines.append(");")
-            lines.append(f"return IFKGeneralApi<{response_type}>(options);")
+            lines.append(f"return FLXGeneralApi<{response_type}>(options);")
         else:
             if has_body_fields:
-                lines.append(f"final options = IFKCustomApiOptions({method_enum}, {api_constant}, data: data);")
+                lines.append(f"final options = FLXCustomApiOptions({method_enum}, {api_constant},data: data);")
             else:
-                lines.append(f"final options = IFKCustomApiOptions({method_enum}, {api_constant});")
-            lines.append("return IFKGeneralApi<dynamic>(options);")
+                lines.append(f"final options = FLXCustomApiOptions({method_enum}, {api_constant});")
+            lines.append("return FLXGeneralApi<dynamic>(options);")
 
         return '\n'.join(lines)
 
@@ -955,8 +955,6 @@ class ApiGenerator:
         lines.append("// 自动生成的 API 常量定义")
         lines.append(f"// 生成时间: {datetime.now().strftime('%Y-%m-%d')}")
         lines.append("")
-        lines.append("export 'package:flux_core/api.dart';")
-        lines.append("export 'package:flux_core/api_enums.dart';")
         lines.append("")
 
         # 导出所有 API 文件
