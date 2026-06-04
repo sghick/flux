@@ -23,7 +23,6 @@ ROUTE_PAGES_FILE = PROJECT_ROOT / "lib" / "routes" / "route_config.pages.dart"
 ROUTE_NAVIGATOR_FILE = PROJECT_ROOT / "lib" / "routes" / "route_navigator.dart"
 MAIN_TAB_LOGIC_FILE = PROJECT_ROOT / "lib" / "pages" / "main_tab" / "main_tab_logic.dart"
 
-
 def load_package_name():
     """从 pubspec.yaml 获取包名"""
     pubspec = PROJECT_ROOT / "pubspec.yaml"
@@ -32,19 +31,7 @@ def load_package_name():
         match = re.search(r'^name:\s*(.+)$', content, re.MULTILINE)
         if match:
             return match.group(1).strip()
-    return "None"
-
-def load_config_package_name():
-    config_package = GEN_CONFIG.get("package", "None")
-    # 如果配置是 None，则使用项目的 package
-    if config_package == "None":
-        return load_package_name()
-    else:
-        return config_package
-
-# 全局包名
-PACKAGE_NAME = load_config_package_name()
-
+    return "fastkeyboard"
 
 def load_gen_config():
     """加载生成器配置文件"""
@@ -67,11 +54,20 @@ def load_gen_config():
         print("提示: 配置文件不存在，使用默认前缀 'IFK'")
         return {"prefix": "IFK"}
 
-
 # 全局配置
 GEN_CONFIG = load_gen_config()
 CLASS_PREFIX = GEN_CONFIG.get("prefix", "IFK")
 
+def load_config_package_name():
+    config_package = GEN_CONFIG.get("package", "None")
+    # 如果配置是 None，则使用项目的 package
+    if config_package == "None":
+        return load_package_name()
+    else:
+        return config_package
+
+# 全局包名
+PACKAGE_NAME = load_config_package_name()
 
 def apply_template_all_placeholder(content, prefix):
     content = apply_package_placeholder(content)
