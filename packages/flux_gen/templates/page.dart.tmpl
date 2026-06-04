@@ -9,14 +9,14 @@ class {prefix}{Name}Page extends StatefulWidget {
   const {prefix}{Name}Page({super.key});
 
   @override
-  State<{prefix}{Name}Page> createState => _{prefix}{Name}PageState();
+  State<{prefix}{Name}Page> createState() => _{prefix}{Name}PageState();
 }
 
 class _{prefix}{Name}PageState extends State<{prefix}{Name}Page> with {prefix}{Name}LogicMixin {
   @override
   Widget build(BuildContext context) {
-    return IFKScaffold(
-      backgroundColor: IFKColorStyles.surface,
+    return {prefix}Scaffold(
+      backgroundColor: {prefix}ColorStyles.surface,
       body: Container(),
     );
   }

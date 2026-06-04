@@ -39,24 +39,24 @@ def load_gen_config():
         try:
             with open(GEN_CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                prefix = config.get("prefix", "IFK")
+                prefix = config.get("prefix", "FLX")
                 if not prefix or not prefix.strip():
-                    print("警告: 配置文件中的 prefix 为空，使用默认值 'IFK'")
-                    return {"prefix": "IFK"}
+                    print("警告: 配置文件中的 prefix 为空，使用默认值 'FLX'")
+                    return {"prefix": "FLX"}
                 return config
         except json.JSONDecodeError as e:
             print(f"警告: 配置文件格式错误: {e}，使用默认配置")
-            return {"prefix": "IFK"}
+            return {"prefix": "FLX"}
         except Exception as e:
             print(f"警告: 读取配置文件失败: {e}，使用默认配置")
-            return {"prefix": "IFK"}
+            return {"prefix": "FLX"}
     else:
-        print("提示: 配置文件不存在，使用默认前缀 'IFK'")
-        return {"prefix": "IFK"}
+        print("提示: 配置文件不存在，使用默认前缀 'FLX'")
+        return {"prefix": "FLX"}
 
 # 全局配置
 GEN_CONFIG = load_gen_config()
-CLASS_PREFIX = GEN_CONFIG.get("prefix", "IFK")
+CLASS_PREFIX = GEN_CONFIG.get("prefix", "FLX")
 
 def load_config_package_name():
     config_package = GEN_CONFIG.get("package", "None")
@@ -167,10 +167,10 @@ def cmd_check(pages, tab_order, main_tab=None):
     """检查命令 - 显示差异"""
     print("页面配置检查：")
     print("=" * 50)
-    
+
     new_count = 0
     exists_count = 0
-    
+
     # main_tab 单独处理
     if main_tab:
         main_tab_file = PAGES_DIR / "main_tab" / "main_tab_page.dart"
@@ -180,19 +180,19 @@ def cmd_check(pages, tab_order, main_tab=None):
         else:
             print(f"\033[32m[新增]\033[0m main_tab ({main_tab})")
             new_count += 1
-    
+
     for page in pages:
         name = page["name"]
         path = page["path"]
         exists = check_page_exists(name, pages)
-        
+
         if exists:
             print(f"\033[33m[既存]\033[0m {name} ({path})")
             exists_count += 1
         else:
             print(f"\033[32m[新增]\033[0m {name} ({path})")
             new_count += 1
-    
+
     print("=" * 50)
     print(f"总计: {len(pages) + (1 if main_tab else 0)} | \033[32m新增 {new_count}\033[0m | \033[33m既存 {exists_count}\033[0m")
 
@@ -200,17 +200,17 @@ def cmd_check(pages, tab_order, main_tab=None):
 def cmd_tree():
     """tree 命令 - 显示文件结构"""
     print("pages/")
-    
+
     def walk_dir(dir_path, prefix=""):
         if not dir_path.exists():
             return
-        
+
         items = sorted(dir_path.iterdir(), key=lambda x: (x.is_file(), x.name))
         for i, item in enumerate(items):
             is_last = i == len(items) - 1
             current_prefix = "└── " if is_last else "├── "
             next_prefix = "    " if is_last else "│   "
-            
+
             if item.is_dir():
                 print(f"{prefix}{current_prefix}{item.name}/")
                 # 检查是否包含 page.dart 或 logic.dart
@@ -222,7 +222,7 @@ def cmd_tree():
                         ) else "├── "
                         print(f"{prefix}{next_prefix}{pf_prefix}{pf.name}")
                 walk_dir(item, prefix + next_prefix)
-    
+
     walk_dir(PAGES_DIR)
 
 
@@ -232,13 +232,13 @@ def generate_page(page, pages):
     page_dir = get_page_dir(name, pages)
     target_dir = PAGES_DIR / page_dir / name
     target_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # 读取模板
     with open(TEMPLATES_DIR / "page.dart.tmpl", "r", encoding="utf-8") as f:
         page_template = f.read()
     with open(TEMPLATES_DIR / "logic.dart.tmpl", "r", encoding="utf-8") as f:
         logic_template = f.read()
-    
+
     # 替换占位符
     pascal_name = to_pascal_case(name)
     page_content = page_template.replace("{name}", name).replace("{Name}", pascal_name).replace("{package}", PACKAGE_NAME)
@@ -247,22 +247,73 @@ def generate_page(page, pages):
     # 替换前缀占位符
     page_content = apply_template_all_placeholder(page_content, CLASS_PREFIX)
     logic_content = apply_template_all_placeholder(logic_content, CLASS_PREFIX)
-    
+
     # 写入文件
     page_file = target_dir / f"{name}_page.dart"
     logic_file = target_dir / f"{name}_logic.dart"
-    
+
     page_file.write_text(page_content, encoding="utf-8")
     logic_file.write_text(logic_content, encoding="utf-8")
-    
+
     return page_file, logic_file
+
+
+def generate_main_tab_page(tab_order, pages_config):
+    """生成 main_tab_page.dart 内容"""
+    # 读取模板
+    template_file = TEMPLATES_DIR / "main_tab_page.dart.tmpl"
+    if not template_file.exists():
+        print("\033[33m[警告]\033[0m main_tab_page.dart.tmpl 模板不存在，使用默认模板")
+        return None
+
+    template = template_file.read_text(encoding="utf-8")
+
+    # 构建 tab 名称到配置信息的映射
+    pages_map = {p["name"]: p for p in pages_config}
+
+    # 生成 imports
+    imports = []
+    indexed_pages = []
+    tab_items = []
+
+    for idx, tab_name in enumerate(tab_order):
+        if tab_name not in pages_map:
+            continue
+
+        page_info = pages_map[tab_name]
+        path = page_info["path"]
+
+        # 生成 Page 类名
+        page_class = f"{CLASS_PREFIX}{to_pascal_case(tab_name)}Page"
+
+        # 生成 import 路径
+        import_path = get_page_import_path(tab_name, path)
+        import_line = f"import 'package:{PACKAGE_NAME}/{import_path}';"
+        if import_line not in imports:
+            imports.append(import_line)
+
+        # 添加到 IndexedStack
+        indexed_pages.append(f"{page_class}()")
+
+        # 生成 Tab 项（统一使用 home 图标，label 使用 tab_name）
+        tab_item = f"                  _buildTabItem(icon: Icons.home_outlined, activeIcon: Icons.home, label: '{tab_name}', index: {idx}),"
+        tab_items.append(tab_item)
+
+    # 替换模板占位符
+    content = template.replace("{package}", PACKAGE_NAME)
+    content = content.replace("{prefix}", CLASS_PREFIX)
+    content = content.replace("{page_imports}", "\n".join(imports))
+    content = content.replace("{indexed_stack_pages}", ", ".join(indexed_pages))
+    content = content.replace("{tab_items}", "\n".join(tab_items))
+
+    return content
 
 
 def cmd_generate(pages, tab_order, main_tab=None):
     """generate 命令 - 生成页面"""
     new_count = 0
     skip_count = 0
-    
+
     # main_tab 单独处理
     if main_tab:
         main_tab_file = PAGES_DIR / "main_tab" / "main_tab_page.dart"
@@ -270,15 +321,33 @@ def cmd_generate(pages, tab_order, main_tab=None):
             print(f"\033[33m[既存]\033[0m main_tab ({main_tab})")
             skip_count += 1
         else:
-            # main_tab_page.dart 已存在（main_tab_logic.dart 存在说明页面已创建）
-            print(f"\033[33m[既存]\033[0m main_tab ({main_tab})")
-            skip_count += 1
-    
+            # 生成 main_tab 文件
+            target_dir = PAGES_DIR / "main_tab"
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # 生成 main_tab_page.dart
+            main_tab_content = generate_main_tab_page(tab_order, pages)
+            if main_tab_content:
+                main_tab_page_file = target_dir / "main_tab_page.dart"
+                main_tab_page_file.write_text(main_tab_content, encoding="utf-8")
+
+            # 生成 main_tab_logic.dart（使用标准模板）
+            with open(TEMPLATES_DIR / "logic.dart.tmpl", "r", encoding="utf-8") as f:
+                logic_template = f.read()
+            logic_content = logic_template.replace("{name}", "main_tab").replace("{Name}", "MainTab").replace("{package}", PACKAGE_NAME)
+            logic_content = apply_template_all_placeholder(logic_content, CLASS_PREFIX)
+
+            main_tab_logic_file = target_dir / "main_tab_logic.dart"
+            main_tab_logic_file.write_text(logic_content, encoding="utf-8")
+
+            print(f"\033[32m[新增]\033[0m main_tab ({main_tab})")
+            new_count += 1
+
     for page in pages:
         name = page["name"]
         path = page["path"]
         exists = check_page_exists(name, pages)
-        
+
         if exists:
             # 跳过已存在的页面
             print(f"\033[33m[既存]\033[0m {name} ({path})")
@@ -288,29 +357,8 @@ def cmd_generate(pages, tab_order, main_tab=None):
             generate_page(page, pages)
             print(f"\033[32m[新增]\033[0m {name} ({path})")
             new_count += 1
-    
+
     print(f"\n完成: \033[32m新增 {new_count}\033[0m | \033[33m既存 {skip_count}\033[0m")
-
-
-def get_path_group(path):
-    """根据路径获取分组名称"""
-    if path.startswith("/auth"):
-        return "Auth"
-    elif path.startswith("/home") or path.startswith("/keyboards"):
-        return "Home"
-    elif path.startswith("/keyboard"):
-        return "Keyboard"
-    elif path.startswith("/chat"):
-        return "Chat"
-    elif path.startswith("/settings"):
-        return "Settings"
-    elif path.startswith("/profile"):
-        return "Profile"
-    elif path.startswith("/training"):
-        return "Training"
-    elif path.startswith("/web"):
-        return "Web"
-    return "Root"
 
 
 def update_route_config_path(pages, main_tab=None, verbose=False):
@@ -325,7 +373,7 @@ def update_route_config_path(pages, main_tab=None, verbose=False):
     for match in re.findall(r'static const (path\w+) = [\'"](.*?)[\'"];', content):
         const_name, path = match
         existing[const_name] = path
-    
+
     def get_last_path_segment(path):
         """获取路径的最后一段，如 /keyboards/keyboard_detail/:id -> /keyboard_detail/:id"""
         if not path:
@@ -347,7 +395,7 @@ def update_route_config_path(pages, main_tab=None, verbose=False):
                 skip_entries.append((name, short_path))
         else:
             new_entries.append((name, short_path, const_name))
-    
+
     # 添加 main_tab 路由
     if main_tab:
         if "pathMainTab" in existing:
@@ -355,32 +403,22 @@ def update_route_config_path(pages, main_tab=None, verbose=False):
                 skip_entries.append(("main_tab", main_tab))
         else:
             new_entries.append(("main_tab", main_tab, "pathMainTab"))
-    
+
     # 输出详情
     if verbose:
         for name, path in skip_entries:
             print(f"\033[33m[既存]\033[0m path.{to_const_name(name)} = '{path}'")
         for name, path, const_name in new_entries:
             print(f"\033[32m[新增]\033[0m path.{const_name} = '{path}'")
-    
+
     if not new_entries:
         return 0, len(skip_entries)
-    
-    # 按分组整理
-    grouped = {}
-    for name, path, const_name in new_entries:
-        group = get_path_group(path) if path.startswith("/") else "Root"
-        if group not in grouped:
-            grouped[group] = []
-        grouped[group].append((name, path, const_name))
-    
-    # 生成插入代码
+
+    # 生成插入代码（不再分组，直接按顺序添加）
     insert_lines = []
-    for group, entries in grouped.items():
-        insert_lines.append(f"  /// ==================== {group} ====================")
-        for name, path, const_name in entries:
-            insert_lines.append(f'  static const {const_name} = \'{path}\';')
-    
+    for name, path, const_name in new_entries:
+        insert_lines.append(f'  static const {const_name} = \'{path}\';')
+
     insert_text = "\n".join(insert_lines)
 
     # 在最后一个 static const 后插入（在 } 前）
@@ -396,7 +434,7 @@ def update_route_config_path(pages, main_tab=None, verbose=False):
             f'{insert_text}\n\\1',
             content
         )
-    
+
     ROUTE_PATH_FILE.write_text(new_content, encoding="utf-8")
     return len(new_entries), len(skip_entries)
 
@@ -405,14 +443,14 @@ def update_route_config_pages(pages, main_tab=None, verbose=False):
     """更新 route_config.pages.dart"""
     if not ROUTE_PAGES_FILE.exists():
         return 0, 0
-    
+
     pages_content = ROUTE_PAGES_FILE.read_text(encoding="utf-8")
     config_content = None
     config_file = PROJECT_ROOT / "lib" / "routes" / "route_config.dart"
-    
+
     if config_file.exists():
         config_content = config_file.read_text(encoding="utf-8")
-    
+
     # 按分组收集新条目
     new_entries = []
     skip_entries = []
@@ -426,8 +464,7 @@ def update_route_config_pages(pages, main_tab=None, verbose=False):
             continue
 
         const_name = to_const_name(name)
-        group = get_path_group(page["path"])
-        new_entries.append((class_name, const_name, group))
+        new_entries.append((class_name, const_name))
 
     # 添加 main_tab 页面
     if main_tab:
@@ -435,31 +472,22 @@ def update_route_config_pages(pages, main_tab=None, verbose=False):
             if verbose:
                 skip_entries.append((f"{CLASS_PREFIX}MainTabPage", "pathMainTab"))
         else:
-            new_entries.insert(0, (f"{CLASS_PREFIX}MainTabPage", "pathMainTab", "Root"))
-    
+            new_entries.insert(0, (f"{CLASS_PREFIX}MainTabPage", "pathMainTab"))
+
     # 输出详情
     if verbose:
         for class_name, const_name in skip_entries:
             print(f"\033[33m[既存]\033[0m {class_name}(name: RoutePath.{const_name})")
-        for class_name, const_name, group in new_entries:
+        for class_name, const_name in new_entries:
             print(f"\033[32m[新增]\033[0m {class_name}(name: RoutePath.{const_name})")
-    
+
     if not new_entries:
         return 0, len(skip_entries)
-    
-    # 按分组整理
-    grouped = {}
-    for class_name, const_name, group in new_entries:
-        if group not in grouped:
-            grouped[group] = []
-        grouped[group].append((class_name, const_name))
-    
-    # 生成插入代码
+
+    # 生成插入代码（不再分组，直接按顺序添加）
     insert_lines = []
-    for group, entries in grouped.items():
-        insert_lines.append(f"    /// ==================== {group} ====================")
-        for class_name, const_name in entries:
-            insert_lines.append(f'    {CLASS_PREFIX}GetPage(name: RoutePath.{const_name}, page: () => const {class_name}()),')
+    for class_name, const_name in new_entries:
+        insert_lines.append(f'    {CLASS_PREFIX}GetPage(name: RoutePath.{const_name}, page: () => const {class_name}()),')
 
     # 总是处理 imports（不管是否有新条目）
     if config_content:
@@ -471,7 +499,7 @@ def update_route_config_pages(pages, main_tab=None, verbose=False):
             # 检查 import 是否已存在
             if import_line not in config_content:
                 config_content = import_line + config_content
-        
+
         # 处理 main_tab import
         if main_tab:
             main_tab_import = f"import 'package:{PACKAGE_NAME}/pages/main_tab/main_tab_page.dart';\n"
@@ -506,10 +534,10 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
     """更新 route_navigator.dart"""
     if not ROUTE_NAVIGATOR_FILE.exists():
         return 0, 0
-    
+
     content = ROUTE_NAVIGATOR_FILE.read_text(encoding="utf-8")
     original_content = content
-    
+
     # 按分组收集新方法
     new_entries = []
     skip_entries = []
@@ -517,47 +545,37 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
         name = page["name"]
         const_name = to_const_name(name)
         method_name = "go" + to_camel_case(name) + "Page"
-        
+
         # 检查是否已存在
         if f"{method_name}<" in content:
             if verbose:
                 skip_entries.append((method_name, const_name))
             continue
-        
-        group = get_path_group(page["path"])
-        new_entries.append((method_name, const_name, name, group))
-    
+
+        new_entries.append((method_name, const_name, name))
+
     # 添加 main_tab 方法
     if main_tab:
         if "goMainTabPage<" in content:
             if verbose:
                 skip_entries.append(("goMainTabPage", "pathMainTab"))
         else:
-            new_entries.insert(0, ("goMainTabPage", "pathMainTab", "main_tab", "Root"))
-    
+            new_entries.insert(0, ("goMainTabPage", "pathMainTab", "main_tab"))
+
     # 输出详情
     if verbose:
         for method_name, const_name in skip_entries:
             print(f"\033[33m[既存]\033[0m {method_name}()")
-        for method_name, const_name, name, group in new_entries:
+        for method_name, const_name, name in new_entries:
             print(f"\033[32m[新增]\033[0m {method_name}()")
-    
+
     if not new_entries:
         return 0, len(skip_entries)
-    
-    # 按分组整理
-    grouped = {}
-    for method_name, const_name, name, group in new_entries:
-        if group not in grouped:
-            grouped[group] = []
-        grouped[group].append((method_name, const_name, name))
-    
+
+    # 生成新方法代码（不再分组，直接按顺序添加）
     new_methods = []
-    for group, entries in grouped.items():
-        new_methods.append(f"  /// ==================== {group} ====================")
-        for method_name, const_name, name in entries:
-            new_methods.append(f'  /// go {name} page')
-            new_methods.append(f'  Future<T?> {method_name}<T>() => _getToNamed<T>(RoutePath.{const_name});')
+    for method_name, const_name, name in new_entries:
+        new_methods.append(f'  Future<T?> {method_name}<T>() => _getToNamed<T>(RoutePath.{const_name});')
     
     methods_text = "\n".join(new_methods)
     # 在类末尾闭合前插入
