@@ -29,7 +29,10 @@ void main(List<String> arguments) {
   final results = parser.parse(arguments);
 
   if (results.command == null || results['version'] as bool) {
-    print('Flux CLI v0.2.1');
+    // version 从 pubspec.yaml 获取
+    var pubspecContent = File('../pubspec.yaml').readAsStringSync();
+    var version = pubspecContent.split('version: ').last.split('\n').first;
+    print('Flux CLI v${version}');
     print('');
     print('Usage: flux <command> [arguments]');
     print('');
