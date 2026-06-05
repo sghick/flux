@@ -1,6 +1,6 @@
 name: flux
 description: "Flux CLI — Scaffold Flutter projects with the Flux framework."
-version: 0.2.8
+version: 0.2.9
 publish_to: 'none'
 
 environment:
