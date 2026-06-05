@@ -100,12 +100,6 @@ class CreateCommand {
   void _createProjectStructure(String projectPath) {
     final libDir = Directory('$projectPath/lib');
 
-    // consts
-    Directory('${libDir.path}/consts').createSync();
-    File('${libDir.path}/consts/strings.dart').writeAsStringSync('class AppStrings {}');
-    File('${libDir.path}/consts/urls.dart').writeAsStringSync('class AppUrls {}');
-    File('${libDir.path}/consts/events.dart').writeAsStringSync('class AppEvents {}');
-
     // main.dart
     _createMainFile('${libDir.path}/main.dart');
   }
