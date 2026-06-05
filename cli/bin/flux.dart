@@ -9,6 +9,8 @@ import '../lib/src/commands/init_command.dart';
 import '../lib/src/commands/uninstall_command.dart';
 import '../lib/src/commands/upgrade_command.dart';
 
+const String _cliDir = String.fromEnvironment('flux.cliDir', defaultValue: '');
+
 String getVersion() {
   String? pubspecPath;
 
@@ -18,27 +20,18 @@ String getVersion() {
   } else {
     // 开发时使用 Platform.script
     final scriptPath = Platform.script.toFilePath();
-    // DEBUG
-    print('DEBUG getVersion: scriptPath = $scriptPath');
     if (scriptPath.endsWith('.dart')) {
       pubspecPath = '${File(scriptPath).parent.parent.path}/pubspec.yaml';
     } else {
-      // 编译后的可执行文件，尝试使用可执行文件所在目录的上一级
-      pubspecPath = '${File(scriptPath).parent.parent.path}/cli/pubspec.yaml';
+      // 编译后的可执行文件，使用包目录
+      pubspecPath = '${File(scriptPath).parent.path}/../pkg/flux/cli/pubspec.yaml';
     }
-    // DEBUG
-    print('DEBUG getVersion: pubspecPath = $pubspecPath');
   }
 
   final pubspecFile = File(pubspecPath);
-  print('DEBUG getVersion: exists = ${pubspecFile.existsSync()}');
   if (!pubspecFile.existsSync()) {
     return '0.0.0';
   }
-  final content = pubspecFile.readAsStringSync();
-  final yaml = loadYaml(content) as YamlMap;
-  return yaml['version'] ?? '0.0.0';
-}
   final content = pubspecFile.readAsStringSync();
   final yaml = loadYaml(content) as YamlMap;
   return yaml['version'] ?? '0.0.0';
