@@ -10,7 +10,8 @@ import '../lib/src/commands/uninstall_command.dart';
 import '../lib/src/commands/upgrade_command.dart';
 
 String getVersion() {
-  final pubspecFile = File('${Directory.current.path}/pubspec.yaml');
+  final cliDir = File(Platform.script.toFilePath()).parent.parent;
+  final pubspecFile = File('${cliDir.path}/pubspec.yaml');
   final content = pubspecFile.readAsStringSync();
   final yaml = loadYaml(content) as YamlMap;
   return yaml['version'] ?? '0.0.0';
