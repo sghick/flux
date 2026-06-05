@@ -10,8 +10,12 @@ import '../lib/src/commands/uninstall_command.dart';
 import '../lib/src/commands/upgrade_command.dart';
 
 String getVersion() {
+  // 获取 cli/bin/flux.dart 的目录，然后上一级到 cli/ 目录
   final cliDir = File(Platform.script.toFilePath()).parent.parent;
   final pubspecFile = File('${cliDir.path}/pubspec.yaml');
+  if (!pubspecFile.existsSync()) {
+    return '0.0.0';
+  }
   final content = pubspecFile.readAsStringSync();
   final yaml = loadYaml(content) as YamlMap;
   return yaml['version'] ?? '0.0.0';
