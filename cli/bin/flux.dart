@@ -21,7 +21,6 @@ String getVersion() {
     '$parentParentDir/pubspec.yaml',  // 标准相对路径
     '$parentDir/pubspec.yaml',        // 同级目录
     '$parentDir/packages/flux/cli/pubspec.yaml',  // pub 解析后的包路径
-    '$parentDir/pkg/flux/cli/pubspec.yaml',  // 另一种包路径
   ];
 
   for (final path in candidates) {
