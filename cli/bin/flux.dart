@@ -2,11 +2,19 @@
 
 import 'dart:io';
 import 'package:args/args.dart';
+import 'package:yaml/yaml.dart';
 import '../lib/src/commands/create_command.dart';
 import '../lib/src/commands/gen_command.dart';
 import '../lib/src/commands/init_command.dart';
 import '../lib/src/commands/uninstall_command.dart';
 import '../lib/src/commands/upgrade_command.dart';
+
+String getVersion() {
+  final pubspecFile = File('${Directory.current.path}/pubspec.yaml');
+  final content = pubspecFile.readAsStringSync();
+  final yaml = loadYaml(content) as YamlMap;
+  return yaml['version'] ?? '0.0.0';
+}
 
 void main(List<String> arguments) {
   final parser = ArgParser()
@@ -29,8 +37,8 @@ void main(List<String> arguments) {
   final results = parser.parse(arguments);
 
   if (results.command == null || results['version'] as bool) {
-    // version 从 pubspec.yaml 获取
-    print('Flux CLI v0.2.7');
+    final version = getVersion();
+    print('Flux CLI v$version');
     print('');
     print('Usage: flux <command> [arguments]');
     print('');
