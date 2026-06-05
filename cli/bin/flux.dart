@@ -12,23 +12,18 @@ import '../lib/src/commands/upgrade_command.dart';
 const String _cliDir = String.fromEnvironment('flux.cliDir', defaultValue: '');
 
 String getVersion() {
-  String? pubspecPath;
-
-  if (_cliDir.isNotEmpty) {
-    // 编译时传入的路径
-    pubspecPath = '$_cliDir/pubspec.yaml';
-  } else {
-    // 开发时使用 Platform.script
-    final scriptPath = Platform.script.toFilePath();
-    if (scriptPath.endsWith('.dart')) {
-      pubspecPath = '${File(scriptPath).parent.parent.path}/pubspec.yaml';
-    } else {
-      // 编译后的可执行文件，使用包目录
-      pubspecPath = '${File(scriptPath).parent.path}/../pkg/flux/cli/pubspec.yaml';
-    }
-  }
-
+  final scriptPath = Platform.script.toFilePath();
+  final parentDir = File(scriptPath).parent.path;
+  final parentParentDir = File(scriptPath).parent.parent.path;
+  final pubspecPath = '$parentParentDir/pubspec.yaml';
   final pubspecFile = File(pubspecPath);
+
+  print('DEBUG: scriptPath = $scriptPath');
+  print('DEBUG: parentDir = $parentDir');
+  print('DEBUG: parentParentDir = $parentParentDir');
+  print('DEBUG: pubspecPath = $pubspecPath');
+  print('DEBUG: exists = ${pubspecFile.existsSync()}');
+
   if (!pubspecFile.existsSync()) {
     return '0.0.0';
   }
