@@ -8,4 +8,3 @@ abstract class FLXError implements Exception {
   @override
   String toString() => msg ?? '';
 }
-

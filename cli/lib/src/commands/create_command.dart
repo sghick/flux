@@ -94,27 +94,11 @@ class CreateCommand {
     print('  cd $projectName');
     print('  flutter run');
     print('');
-    print('To customize UI, edit files in lib/ui/handlers/');
+    print('To customize the app, edit lib/main.dart');
   }
 
   void _createProjectStructure(String projectPath) {
     final libDir = Directory('$projectPath/lib');
-
-    // config
-    Directory('${libDir.path}/config').createSync();
-    File('${libDir.path}/config/config.dart').writeAsStringSync('''
-class AppConfig {
-  final String host;
-  final String appName;
-
-  const AppConfig({
-    this.host = 'http://localhost:8080',
-    this.appName = '$projectPath',
-  });
-
-  static const AppConfig current = AppConfig();
-}
-''');
 
     // consts
     Directory('${libDir.path}/consts').createSync();
@@ -122,136 +106,8 @@ class AppConfig {
     File('${libDir.path}/consts/urls.dart').writeAsStringSync('class AppUrls {}');
     File('${libDir.path}/consts/events.dart').writeAsStringSync('class AppEvents {}');
 
-    // routes
-    Directory('${libDir.path}/routes').createSync();
-    _createRouteFiles('${libDir.path}/routes');
-
-    // ui/handlers
-    Directory('${libDir.path}/ui/handlers').createSync(recursive: true);
-    _createUIHandlers('${libDir.path}/ui/handlers');
-
     // main.dart
-    if (!File('${libDir.path}/main.dart').existsSync()) {
-      _createMainFile('${libDir.path}/main.dart');
-    }
-  }
-
-  void _createRouteFiles(String routesPath) {
-    File('$routesPath/route_config.path.dart').writeAsStringSync('''
-class RoutePath {
-  static const String pathSplash = '/auth/splash';
-  static const String pathWeb = '/others/web';
-}
-''');
-
-    File('$routesPath/route_config.pages.dart').writeAsStringSync('''
-import 'package:get/get.dart';
-
-part of 'route_config.dart';
-
-class RoutePages {
-  static final List<GetPage> getPages = [];
-}
-''');
-
-    File('$routesPath/route_config.dart').writeAsStringSync('''
-import 'package:get/get.dart';
-
-part 'route_config.pages.dart';
-part 'route_config.path.dart';
-
-class RouteConfig {
-  static final List<GetPage> getPages = RoutePages.getPages;
-}
-''');
-
-    File('$routesPath/page_params.dart').writeAsStringSync('''
-class FLXParams {
-  static const String url = 'url';
-  static const String title = 'title';
-}
-''');
-
-    File('$routesPath/route_navigator.dart').writeAsStringSync('''
-import 'package:get/get.dart';
-import 'route_config.dart';
-
-final nav = FLXNavigator();
-
-class FLXNavigator {
-  Future<T?> goWebPage<T>(String url, {String title = ''}) =>
-      Get.toNamed<T>(RoutePath.pathWeb, arguments: {FLXParams.url: url, FLXParams.title: title});
-}
-''');
-  }
-
-  void _createUIHandlers(String handlersPath) {
-    File('$handlersPath/toast_handler.dart').writeAsStringSync('''
-import 'package:flux_core/interfaces/toast_handler.dart';
-import 'package:flutter/material.dart';
-
-class AppToastHandler implements FLXToastHandler {
-  @override
-  void show(String message, {FLXToastType type = FLXToastType.info, Duration? duration}) {
-    debugPrint('[AppToast] \$type: \$message');
-  }
-}
-''');
-
-    File('$handlersPath/dialog_handler.dart').writeAsStringSync('''
-import 'package:flux_core/interfaces/dialog_handler.dart';
-import 'package:flutter/material.dart';
-
-class AppDialogHandler implements FLXDialogHandler {
-  @override
-  Future<T?> showAlert<T>({
-    String? title,
-    String? message,
-    Widget? content,
-    List<FLXDialogAction> actions = const [],
-    bool barrierDismissible = true,
-  }) {
-    debugPrint('[AppDialog] alert: title=\$title');
-    return Future.value(null);
-  }
-
-  @override
-  Future<T?> showSheet<T>({
-    required Widget builder,
-    bool barrierDismissible = true,
-  }) {
-    debugPrint('[AppDialog] sheet');
-    return Future.value(null);
-  }
-}
-''');
-
-    File('$handlersPath/loading_handler.dart').writeAsStringSync('''
-import 'package:flutter/material.dart';
-import 'package:flux_core/widgets/loading/loading_handler.dart';
-
-class AppNormalLoadingHandler implements FLXLoadingHandlerInterface {
-  @override
-  bool get shouldDelay => false;
-
-  @override
-  void showLoading() {}
-
-  @override
-  void dismissLoading() {}
-}
-
-class AppClearLoadingHandler implements FLXLoadingHandlerInterface {
-  @override
-  bool get shouldDelay => false;
-
-  @override
-  void showLoading() {}
-
-  @override
-  void dismissLoading() {}
-}
-''');
+    _createMainFile('${libDir.path}/main.dart');
   }
 
   void _createMainFile(String mainPath) {
@@ -260,8 +116,6 @@ import 'package:flux_core/flux_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
-import 'config/config.dart';
-import 'routes/route_config.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -275,8 +129,6 @@ class App extends StatelessWidget {
   Widget build(BuildContext context) {
     return GetMaterialApp(
       debugShowCheckedModeBanner: false,
-      initialRoute: RoutePath.pathSplash,
-      getPages: RouteConfig.getPages,
       builder: (context, child) {
         ScreenUtil.init(context, designSize: const Size(375, 667));
         return MediaQuery(
