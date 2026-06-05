@@ -15,21 +15,45 @@ String getVersion() {
   final scriptPath = Platform.script.toFilePath();
   final parentDir = File(scriptPath).parent.path;
   final parentParentDir = File(scriptPath).parent.parent.path;
-  final pubspecPath = '$parentParentDir/pubspec.yaml';
-  final pubspecFile = File(pubspecPath);
 
-  print('DEBUG: scriptPath = $scriptPath');
-  print('DEBUG: parentDir = $parentDir');
-  print('DEBUG: parentParentDir = $parentParentDir');
-  print('DEBUG: pubspecPath = $pubspecPath');
-  print('DEBUG: exists = ${pubspecFile.existsSync()}');
+  // 尝试多个可能的位置
+  final candidates = [
+    '$parentParentDir/pubspec.yaml',  // 标准相对路径
+    '$parentDir/pubspec.yaml',        // 同级目录
+    '$parentDir/packages/flux/cli/pubspec.yaml',  // pub 解析后的包路径
+    '$parentDir/pkg/flux/cli/pubspec.yaml',  // 另一种包路径
+  ];
 
-  if (!pubspecFile.existsSync()) {
-    return '0.0.0';
+  for (final path in candidates) {
+    final file = File(path);
+    if (file.existsSync()) {
+      final content = file.readAsStringSync();
+      final yaml = loadYaml(content) as YamlMap;
+      return yaml['version'] ?? '0.0.0';
+    }
   }
-  final content = pubspecFile.readAsStringSync();
-  final yaml = loadYaml(content) as YamlMap;
-  return yaml['version'] ?? '0.0.0';
+
+  // 尝试从 git 缓存目录获取
+  final gitCacheDir = Platform.environment['PUB_CACHE']
+      ?? '${Platform.environment['HOME']}/.pub-cache';
+  final gitFluxDir = Directory('$gitCacheDir/git')
+      .listSync()
+      .whereType<Directory>()
+      .firstWhere(
+        (d) => d.path.contains('flux-'),
+        orElse: () => Directory(''),
+      );
+
+  if (gitFluxDir.path.isNotEmpty) {
+    final pubspec = File('${gitFluxDir.path}/cli/pubspec.yaml');
+    if (pubspec.existsSync()) {
+      final content = pubspec.readAsStringSync();
+      final yaml = loadYaml(content) as YamlMap;
+      return yaml['version'] ?? '0.0.0';
+    }
+  }
+
+  return '0.0.0';
 }
 
 void main(List<String> arguments) {
