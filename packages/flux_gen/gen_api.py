@@ -27,14 +27,16 @@ from datetime import datetime
 
 @dataclass
 class ApiField:
-    """API 字段定义"""
-    name: str
-    type: str
-    json_name: Optional[str] = None
-    optional: bool = False
-    default: Optional[str] = None
-    is_header: bool = False
-    comment: str = ""
+    """API 字段定义 - 支持 go-zero struct tag"""
+    name: str                    # Dart 属性名（驼峰）
+    go_name: str                 # Go 原始字段名
+    type: str                    # Dart 类型
+    tag_source: str = "json"     # tag 来源：json/path/form/header
+    json_name: Optional[str] = None  # JSON key 名
+    optional: bool = False       # 是否可选
+    default: Optional[str] = None  # 默认值
+    comment: str = ""            # 注释
+    line_number: int = 0         # 行号
 
 
 @dataclass
@@ -43,7 +45,7 @@ class ApiStruct:
     name: str
     fields: List[ApiField] = field(default_factory=list)
     comment: str = ""
-    is_common_header: bool = False
+    line_number: int = 0
 
     def is_empty(self) -> bool:
         """检查结构体是否为空（没有字段）"""
@@ -53,32 +55,40 @@ class ApiStruct:
 @dataclass
 class ApiEndpoint:
     """API 端点定义"""
-    method: str
-    path: str
     handler: str
-    doc: str
+    method: str                  # get/post/put/patch/delete/head
+    path: str
+    doc: str = ""
     request_type: Optional[str] = None
     response_type: Optional[str] = None
-    has_auth: bool = False
+    line_number: int = 0
 
 
 @dataclass
 class ApiService:
     """API 服务定义"""
     name: str
+    jwt: bool = False            # 是否启用 JWT
+    jwt_key: str = ""            # JWT 配置键（如 "Auth"）
+    middleware: List[str] = field(default_factory=list)  # 中间件列表
+    prefix: str = ""             # URL 前缀
+    timeout: str = ""            # 超时时间
     endpoints: List[ApiEndpoint] = field(default_factory=list)
-    has_auth: bool = False
+    line_number: int = 0
 
 
 @dataclass
 class ApiFile:
     """解析后的 API 文件"""
-    filepath: str
-    filename: str
-    module_name: str
+    syntax: str = "v1"          # 语法版本
+    info: Dict[str, str] = field(default_factory=dict)  # 元数据（title/desc/author/version）
+    filepath: str = ""
+    filename: str = ""
+    module_name: str = ""
     structs: Dict[str, ApiStruct] = field(default_factory=dict)
     services: List[ApiService] = field(default_factory=list)
     imports: List[str] = field(default_factory=list)
+    comments: Dict[int, str] = field(default_factory=dict)  # 行号 -> 注释
 
 
 # ==================== 配置类 ====================
@@ -97,7 +107,6 @@ class GeneratorConfig:
         'model_prefix': 'FLX',        # 结构体名前缀（如：FLX）
         'model_suffix': '',           # 结构体名后缀
         'skip_req_models': True,
-        'skip_common_header': True,
         'skip_empty_structs': True,   # 跳过空结构体
         'all_fields_nullable': True,  # 所有字段设置为可空类型
 
@@ -120,22 +129,6 @@ class GeneratorConfig:
             'float32': 'double',
             'float': 'double',
         },
-
-        # CommonHeader 展开配置
-        'expand_common_header': True,
-        'common_header_fields': [
-            ['AppPlatform', 'int'],
-            ['AppName', 'String'],
-            ['AppVersion', 'String'],
-            ['AppVersionCode', 'String'],
-            ['PhoneModel', 'String'],
-            ['PhoneBrand', 'String'],
-            ['PhoneOSName', 'String'],
-            ['PhoneOSVersion', 'String'],
-            ['PhoneScreen', 'String'],
-            ['DeviceId', 'String'],
-            ['Token', 'String'],
-        ],
     }
 
     def __init__(self, config_dict: Optional[Dict] = None):
@@ -149,7 +142,6 @@ class GeneratorConfig:
         self.model_prefix = config.get('model_prefix', '')
         self.model_suffix = config.get('model_suffix', '')
         self.skip_req_models = config.get('skip_req_models', True)
-        self.skip_common_header = config.get('skip_common_header', True)
         self.skip_empty_structs = config.get('skip_empty_structs', True)
         self.all_fields_nullable = config.get('all_fields_nullable', True)
         self.api_prefix = config.get('api_prefix', 'FLX')
@@ -167,30 +159,24 @@ class GeneratorConfig:
             'float': 'double',
             **config.get('type_mapping', {})
         }
-        self.expand_common_header = config.get('expand_common_header', True)
-        self.common_header_fields = config.get('common_header_fields', [
-            ['AppPlatform', 'int'],
-            ['AppName', 'String'],
-            ['AppVersion', 'String'],
-            ['AppVersionCode', 'String'],
-            ['PhoneModel', 'String'],
-            ['PhoneBrand', 'String'],
-            ['PhoneOSName', 'String'],
-            ['PhoneOSVersion', 'String'],
-            ['PhoneScreen', 'String'],
-            ['DeviceId', 'String'],
-            ['Token', 'String'],
-        ])
 
 
-# ==================== API 解析器 ====================
+# ==================== Go-Zero API 解析器 ====================
 
 class ApiParser:
-    """.api 文件解析器"""
+    """
+    Go-Zero API DSL 解析器 (v1.19 标准格式)
+
+    支持语法:
+    - syntax = "v1"
+    - info ( title: "xxx" desc: "xxx" )
+    - import "file.api" 或 import ( "a" "b" )
+    - type ( Struct { Field Type `tag:"value"` } )
+    - service name-api { @server (...) @handler Xxx method /path (Req) returns (Resp) }
+    """
 
     def __init__(self, config: GeneratorConfig):
         self.config = config
-        self.common_header_struct: Optional[ApiStruct] = None
 
     def parse_file(self, filepath: str) -> ApiFile:
         """解析单个 .api 文件"""
@@ -206,63 +192,134 @@ class ApiParser:
             module_name=module_name
         )
 
+        # 收集所有注释
+        api_file.comments = self._collect_comments(content)
+
+        # 解析各部分
+        api_file.syntax = self._parse_syntax(content)
+        api_file.info = self._parse_info(content)
         api_file.imports = self._parse_imports(content)
-        api_file.structs = self._parse_structs(content)
+        api_file.structs = self._parse_types(content)
         api_file.services = self._parse_services(content)
 
         return api_file
 
+    def _collect_comments(self, content: str) -> Dict[int, str]:
+        """收集所有注释，行号 -> 注释内容"""
+        comments = {}
+        lines = content.split('\n')
+        for i, line in enumerate(lines, 1):
+            # 单行注释
+            match = re.match(r'\s*//\s*(.*)', line)
+            if match:
+                comments[i] = match.group(1).strip()
+        return comments
+
+    def _parse_syntax(self, content: str) -> str:
+        """解析 syntax 版本声明"""
+        match = re.search(r'syntax\s*=\s*"([^"]+)"', content)
+        if match:
+            return match.group(1)
+        return "v1"  # 默认版本
+
+    def _parse_info(self, content: str) -> Dict[str, str]:
+        """解析 info 元数据块"""
+        info = {}
+
+        # 匹配 info (...) 块
+        info_match = re.search(r'info\s*\(([\s\S]*?)\)', content)
+        if not info_match:
+            return info
+
+        info_content = info_match.group(1)
+
+        # 解析各字段: title: "xxx"
+        for match in re.finditer(r'(\w+):\s*"([^"]*)"', info_content):
+            key = match.group(1)
+            value = match.group(2)
+            info[key] = value
+
+        return info
+
     def _parse_imports(self, content: str) -> List[str]:
-        """解析 import 语句"""
+        """解析 import 语句
+
+        支持格式:
+        - import "file.api"
+        - import ( "file1.api" "file2.api" )
+        """
         imports = []
-        pattern = r'import\s+"([^"]+)"'
-        for match in re.finditer(pattern, content):
+
+        # 单行 import
+        for match in re.finditer(r'import\s+"([^"]+)"', content):
             imports.append(match.group(1))
+
+        # 批量 import: import ( ... )
+        block_match = re.search(r'import\s*\(([\s\S]*?)\)', content)
+        if block_match:
+            block_content = block_match.group(1)
+            for match in re.finditer(r'"([^"]+)"', block_content):
+                imports.append(match.group(1))
+
         return imports
 
-    def _parse_structs(self, content: str) -> Dict[str, ApiStruct]:
-        """解析结构体定义"""
+    def _parse_types(self, content: str) -> Dict[str, ApiStruct]:
+        """解析 type 块
+
+        格式:
+        type (
+            StructName {
+                Field1 Type1 `json:"field1"`
+                Field2 Type2 `form:"field2,optional"`
+            }
+        )
+        """
         structs = {}
 
         # 找到所有 type (...) 块
-        type_start_pattern = r'type\s*\('
-        for type_match in re.finditer(type_start_pattern, content):
-            start_pos = type_match.end()
-            # 找到匹配的 )
-            brace_count = 1
-            end_pos = start_pos
-            while brace_count > 0 and end_pos < len(content):
-                if content[end_pos] == '(':
-                    brace_count += 1
-                elif content[end_pos] == ')':
-                    brace_count -= 1
-                end_pos += 1
+        type_pattern = r'type\s*\(([\s\S]*?)\)'
+        for type_match in re.finditer(type_pattern, content):
+            type_content = type_match.group(1)
 
-            block_content = content[start_pos:end_pos-1]
-
-            # 在块中查找所有结构体定义
-            struct_pattern = r'(\w+)\s*\{([^}]*)\}'
-            for struct_match in re.finditer(struct_pattern, block_content):
+            # 解析每个结构体
+            struct_pattern = r'(\w+)\s*\{([\s\S]*?)\}'
+            for struct_match in re.finditer(struct_pattern, type_content):
                 struct_name = struct_match.group(1)
                 struct_body = struct_match.group(2)
 
-                is_common_header = struct_name == 'CommonHeader'
-
-                struct = ApiStruct(
-                    name=struct_name,
-                    is_common_header=is_common_header
-                )
-
+                struct = ApiStruct(name=struct_name)
                 struct.fields = self._parse_fields(struct_body)
-                structs[struct_name] = struct
 
-                if is_common_header:
-                    self.common_header_struct = struct
+                # 获取结构体前的注释
+                struct.comment = self._get_struct_comment(content, struct_name)
+
+                structs[struct_name] = struct
 
         return structs
 
+    def _get_struct_comment(self, content: str, struct_name: str) -> str:
+        """获取结构体前的注释"""
+        # 查找结构体定义位置前的注释
+        pattern = rf'(\w+)\s*\{{'
+        for match in re.finditer(pattern, content):
+            if match.group(1) == struct_name:
+                # 获取匹配位置前的文本
+                start = max(0, match.start() - 200)
+                text_before = content[start:match.start()]
+
+                # 查找最后一个 // 注释
+                comment_match = re.search(r'//\s*(.+)$', text_before, re.MULTILINE)
+                if comment_match:
+                    return comment_match.group(1).strip()
+
+        return ""
+
     def _parse_fields(self, body: str) -> List[ApiField]:
-        """解析结构体字段"""
+        """解析结构体字段
+
+        格式: FieldName Type `tag:"value,optional"`
+        支持的 tag: json, path, form, header
+        """
         fields = []
 
         for line in body.strip().split('\n'):
@@ -270,125 +327,275 @@ class ApiParser:
             if not line or line.startswith('//'):
                 continue
 
-            if line == 'CommonHeader' or line.startswith('CommonHeader '):
-                if self.config.expand_common_header and self.common_header_struct:
-                    for header_field in self.common_header_struct.fields:
-                        fields.append(ApiField(
-                            name=self._to_camel_case(header_field.name),
-                            type=header_field.type,
-                            json_name=header_field.json_name,
-                            optional=True,
-                            is_header=True
-                        ))
+            # 跳过空行
+            if not line or line.isspace():
                 continue
 
-            field_pattern = r'(\w+)\s+(\[\]\w+|\w+)\s*(?:`([^`]+)`)?\s*(?://\s*(.*))?'
+            # 解析字段行: FieldName Type `tag:"value"`
+            # 支持多行 tag 的情况
+            field_pattern = r'^(\w+)\s+(\S+)\s*(.*)$'
             match = re.match(field_pattern, line)
 
             if match:
                 field_name = match.group(1)
                 field_type = match.group(2)
-                tags_str = match.group(3) or ''
-                comment = match.group(4) or ''
+                rest = match.group(3).strip()
 
-                json_name, optional, default, is_header = self._parse_tags(tags_str)
+                # 解析 Go struct tag
+                tag_match = re.search(r'`([^`]+)`', rest)
+                tag_source = "json"
+                json_name = None
+                optional = False
+                default = None
 
+                if tag_match:
+                    tag_str = tag_match.group(1)
+                    tag_source, json_name, optional, default = self._parse_field_tag(tag_str)
+
+                # 处理数组类型和可空类型
                 is_array = field_type.startswith('[]')
-                base_type = field_type[2:] if is_array else field_type
+                is_pointer = field_type.startswith('*')
+                base_type = field_type[2:] if is_array else (field_type[1:] if is_pointer else field_type)
 
+                # 映射类型
                 dart_type = self._map_type(base_type)
                 if is_array:
                     dart_type = f'List<{dart_type}>'
+                # Go 的 *Type 映射为 Dart 的 nullable
+                if is_pointer:
+                    optional = True
 
-                # 使用 json_name 或 header 名称转换为驼峰作为 Dart 属性名
-                # 优先使用标签中的名称（json:"xxx" 或 header:"Xxx"）
-                source_name = json_name or field_name
-                dart_field_name = self._to_camel_case(source_name)
+                # Go 字段名保持原样，Dart 属性名转驼峰
+                dart_field_name = self._to_camel_case(field_name)
+
+                # 对于 path/form/header 参数，Dart 属性名使用原始名称
+                if tag_source in ('path', 'form', 'header'):
+                    dart_field_name = field_name.lower()
 
                 fields.append(ApiField(
                     name=dart_field_name,
+                    go_name=field_name,
                     type=dart_type,
+                    tag_source=tag_source,
                     json_name=json_name or self._to_snake_case(field_name),
-                    optional=optional or is_header,
-                    default=default,
-                    is_header=is_header,
-                    comment=comment
+                    optional=optional,
+                    default=default
                 ))
 
         return fields
 
-    def _parse_tags(self, tags_str: str) -> Tuple[Optional[str], bool, Optional[str], bool]:
-        """解析字段标签"""
-        json_name = None
-        optional = False
+    def _parse_field_tag(self, tag_str: str) -> Tuple[str, Optional[str], bool, Optional[str]]:
+        """解析 Go struct tag
+
+        支持格式:
+        - `json:"username"`
+        - `json:"username,optional"`
+        - `json:"username,default=abc"`
+        - `form:"page,default=1"`
+        - `path:"id"`
+        - `header:"Authorization"`
+
+        Returns: (source, json_name, optional, default)
+        """
+        # 移除反引号
+        tag_str = tag_str.strip('`')
+
+        # 解析 source (json/path/form/header)
+        source_match = re.match(r'(json|path|form|header):"([^"]+)"', tag_str)
+        if not source_match:
+            return ("json", None, False, None)
+
+        source = source_match.group(1)
+        content = source_match.group(2)
+
+        # 解析选项
+        parts = content.split(',')
+        json_name = parts[0]
+        optional = 'optional' in parts
         default = None
-        is_header = False
 
-        json_match = re.search(r'json:"([^"]+)"', tags_str)
-        if json_match:
-            parts = json_match.group(1).split(',')
-            json_name = parts[0]
-            for part in parts[1:]:
-                if part == 'optional':
-                    optional = True
-                elif part.startswith('default='):
-                    default = part[8:]
+        for part in parts[1:]:
+            if part.startswith('default='):
+                default = part[8:]
 
-        header_match = re.search(r'header:"([^"]+)"', tags_str)
-        if header_match:
-            is_header = True
-            json_name = json_name or self._to_snake_case(header_match.group(1))
-
-        return json_name, optional, default, is_header
+        return (source, json_name, optional, default)
 
     def _parse_services(self, content: str) -> List[ApiService]:
-        """解析服务定义"""
+        """解析 service 块
+
+        格式:
+        @server (
+            jwt: Auth
+            middleware: Log,Cors
+            prefix: /api/v1
+            timeout: 3s
+        )
+        service name-api {
+            @handler Login
+            post /user/login (LoginReq) returns (LoginResp)
+        }
+        """
         services = []
 
-        server_pattern = r'(?:@server\(([^)]*)\)\s*)?service\s+([\w-]+)\s*\{([\s\S]*?)\n\}'
+        # 先提取所有 @server 配置
+        server_configs = self._collect_server_configs(content)
 
-        for match in re.finditer(server_pattern, content):
-            server_config = match.group(1) or ''
-            service_name = match.group(2)
-            service_body = match.group(3)
+        # 处理 service 块
+        # 注意: @server 可能在 service 前或后
+        service_pattern = r'service\s+(\S+)\s*\{([\s\S]*?)\n\}'
 
-            has_auth = 'jwt:' in server_config or 'Auth' in server_config
+        for match in re.finditer(service_pattern, content):
+            service_name = match.group(1)
+            service_body = match.group(2)
 
-            service = ApiService(
-                name=service_name,
-                has_auth=has_auth
-            )
+            service = ApiService(name=service_name)
 
-            service.endpoints = self._parse_endpoints(service_body, has_auth)
+            # 查找关联的 @server 配置（在 service 前后的）
+            service_start = match.start()
+            self._apply_server_config(service, service_start, server_configs)
+
+            # 解析端点
+            service.endpoints = self._parse_endpoints(service_body)
+
             services.append(service)
 
         return services
 
-    def _parse_endpoints(self, body: str, has_auth: bool) -> List[ApiEndpoint]:
-        """解析服务端点"""
+    def _collect_server_configs(self, content: str) -> List[Tuple[int, Dict[str, str]]]:
+        """收集所有 @server 配置"""
+        configs = []
+
+        # 匹配 @server (...) 块
+        pattern = r'@server\s*\(([\s\S]*?)\)'
+        for match in re.finditer(pattern, content):
+            config = self._parse_server_directive(match.group(1))
+            configs.append((match.start(), config))
+
+        return configs
+
+    def _parse_server_directive(self, directive_content: str) -> Dict[str, str]:
+        """解析 @server 指令内容"""
+        config = {}
+
+        # jwt: Auth
+        jwt_match = re.search(r'jwt:\s*(\w+)', directive_content)
+        if jwt_match:
+            config['jwt'] = jwt_match.group(1)
+
+        # middleware: Log,Cors
+        mw_match = re.search(r'middleware:\s*([\w,]+)', directive_content)
+        if mw_match:
+            config['middleware'] = mw_match.group(1)
+
+        # prefix: /api/v1
+        prefix_match = re.search(r'prefix:\s*(\S+)', directive_content)
+        if prefix_match:
+            config['prefix'] = prefix_match.group(1)
+
+        # timeout: 3s
+        timeout_match = re.search(r'timeout:\s*(\S+)', directive_content)
+        if timeout_match:
+            config['timeout'] = timeout_match.group(1)
+
+        return config
+
+    def _apply_server_config(self, service: ApiService, service_pos: int,
+                             server_configs: List[Tuple[int, Dict[str, str]]]):
+        """将 @server 配置应用到 service"""
+        # 查找最近的 @server 配置（在 service 前的）
+        for pos, config in reversed(server_configs):
+            if pos < service_pos:
+                # 应用配置
+                if 'jwt' in config:
+                    service.jwt = True
+                    service.jwt_key = config['jwt']
+                if 'middleware' in config:
+                    service.middleware = config['middleware'].split(',')
+                if 'prefix' in config:
+                    service.prefix = config['prefix']
+                if 'timeout' in config:
+                    service.timeout = config['timeout']
+                break
+
+    def _parse_endpoints(self, body: str) -> List[ApiEndpoint]:
+        """解析端点定义
+
+        格式:
+        @handler Login
+        post /user/login (LoginReq) returns (LoginResp)
+        """
         endpoints = []
 
-        endpoint_pattern = r'@doc\s+"([^"]+)"\s*@handler\s+(\w+)\s+(get|post|put|delete)\s+(\S+)(?:\s*\(\s*(\w+)\s*\))?\s*returns\s*\(\s*(\w+)\s*\)'
+        # 将多个端点合并处理
+        lines = body.strip().split('\n')
 
-        for match in re.finditer(endpoint_pattern, body):
-            doc = match.group(1)
-            handler = match.group(2)
-            method = match.group(3).lower()
-            path = match.group(4)
-            request_type = match.group(5)
-            response_type = match.group(6)
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
 
-            endpoints.append(ApiEndpoint(
-                method=method,
-                path=path,
-                handler=handler,
-                doc=doc,
-                request_type=request_type,
-                response_type=response_type,
-                has_auth=has_auth
-            ))
+            # 跳过空行和注释
+            if not line or line.startswith('//'):
+                i += 1
+                continue
+
+            # 检查是否是 @handler 开头
+            handler_match = re.match(r'@handler\s+(\w+)', line)
+            if handler_match:
+                handler_name = handler_match.group(1)
+                i += 1
+
+                # 下一行应该是 HTTP 方法定义
+                if i < len(lines):
+                    method_line = lines[i].strip()
+
+                    # 解析: post /path (Req) returns (Resp)
+                    endpoint = self._parse_endpoint_line(method_line)
+                    if endpoint:
+                        endpoint.handler = handler_name
+                        endpoints.append(endpoint)
+
+            i += 1
 
         return endpoints
+
+    def _parse_endpoint_line(self, line: str) -> Optional[ApiEndpoint]:
+        """解析端点行
+
+        格式: method /path (RequestType) returns (ResponseType)
+        或: method /path returns (ResponseType)  # 无请求体
+        """
+        # 匹配 HTTP 方法和路径
+        method_match = re.match(r'(get|post|put|patch|delete|head)\s+(\S+)', line, re.IGNORECASE)
+        if not method_match:
+            return None
+
+        method = method_match.group(1).lower()
+        path = method_match.group(2)
+
+        # 解析请求和响应类型
+        request_type = None
+        response_type = None
+
+        # 匹配 (Req) returns (Resp)
+        returns_match = re.search(r'\(([^)]*)\)\s+returns\s+\(([^)]*)\)', line)
+        if returns_match:
+            req_part = returns_match.group(1).strip()
+            resp_part = returns_match.group(2).strip()
+            request_type = req_part if req_part else None
+            response_type = resp_part if resp_part else None
+
+        # 匹配 returns (Resp) - 无请求体
+        elif re.search(r'returns\s+\(([^)]*)\)', line):
+            resp_match = re.search(r'returns\s+\(([^)]*)\)', line)
+            response_type = resp_match.group(1).strip()
+
+        return ApiEndpoint(
+            handler="",
+            method=method,
+            path=path,
+            request_type=request_type,
+            response_type=response_type
+        )
 
     def _map_type(self, api_type: str) -> str:
         """映射 API 类型到 Dart 类型"""
@@ -398,8 +605,7 @@ class ApiParser:
         return self.config.type_mapping.get(api_type, api_type)
 
     def _to_camel_case(self, name: str) -> str:
-        """将 snake_case 或 PascalCase 转换为 camelCase (如 phoneLogin, getDeviceList)"""
-        # 先转换为 snake_case，然后再转换为 camelCase
+        """将 snake_case 或 PascalCase 转换为 camelCase"""
         snake = self._to_snake_case(name)
         components = snake.split('_')
         if len(components) == 1:
@@ -457,10 +663,6 @@ class ModelGenerator:
         lines.append("")
 
         for struct_name, struct in api_file.structs.items():
-            # 跳过 CommonHeader
-            if struct.is_common_header and self.config.skip_common_header:
-                continue
-
             # 跳过 Req 结尾的结构体
             if struct_name.endswith('Req') and self.config.skip_req_models:
                 continue
@@ -487,8 +689,6 @@ class ModelGenerator:
 
         for struct_name, struct in api_file.structs.items():
             # 跳过不需要生成的结构体
-            if struct.is_common_header and self.config.skip_common_header:
-                continue
             if struct_name.endswith('Req') and self.config.skip_req_models:
                 continue
             if struct.is_empty() and self.config.skip_empty_structs:
@@ -519,9 +719,20 @@ class ModelGenerator:
         return external_types
 
     def _get_prefixed_type(self, field_type: str) -> str:
-        """获取带前缀的类型名（处理自定义类型）"""
+        """获取带前缀的类型名（处理自定义类型）
+
+        处理:
+        - 普通类型: QuoteDrop -> FLXQuoteDrop
+        - 指针类型: *QuoteDrop -> FLXQuoteDrop
+        - 数组类型: List<QuoteDrop> -> List<FLXQuoteDrop>
+        """
         # 检查是否是基本类型
         base_types = {'String', 'int', 'double', 'bool', 'dynamic', 'Object'}
+
+        # 处理指针类型
+        is_pointer = field_type.startswith('*')
+        if is_pointer:
+            field_type = field_type[1:]  # 移除 *
 
         # 处理 List<T> 类型
         if field_type.startswith('List<') and field_type.endswith('>'):
@@ -661,21 +872,49 @@ class ApiCodeGenerator:
                     struct = api_file.structs[endpoint.request_type]
                     for field in struct.fields:
                         field_type = field.type
+                        # 处理指针类型
+                        if field_type.startswith('*'):
+                            field_type = field_type[1:]  # 移除 *
                         # 处理 List<T> 类型
                         if field_type.startswith('List<') and field_type.endswith('>'):
                             inner_type = field_type[5:-1]
-                            if inner_type in self.type_to_module:
-                                module = self.type_to_module[inner_type]
+                            prefixed_name = self._get_prefixed_name(inner_type)
+                            if prefixed_name in self.type_to_module:
+                                module = self.type_to_module[prefixed_name]
                                 if module not in external_types:
                                     external_types[module] = set()
-                                external_types[module].add(inner_type)
-                        elif field_type in self.type_to_module:
-                            module = self.type_to_module[field_type]
-                            if module not in external_types:
-                                external_types[module] = set()
-                            external_types[module].add(field_type)
+                                external_types[module].add(prefixed_name)
+                        else:
+                            prefixed_name = self._get_prefixed_name(field_type)
+                            if prefixed_name in self.type_to_module:
+                                module = self.type_to_module[prefixed_name]
+                                if module not in external_types:
+                                    external_types[module] = set()
+                                external_types[module].add(prefixed_name)
 
         return external_types
+
+    def _get_prefixed_type(self, field_type: str) -> str:
+        """获取带前缀的类型名（处理自定义类型）
+
+        处理:
+        - 普通类型: AnswerItem -> FLXAnswerItem
+        - 数组类型: List<AnswerItem> -> List<FLXAnswerItem>
+        """
+        base_types = {'String', 'int', 'double', 'bool', 'dynamic', 'Object'}
+
+        # 处理 List<T> 类型
+        if field_type.startswith('List<') and field_type.endswith('>'):
+            inner_type = field_type[5:-1]
+            if inner_type not in base_types:
+                return f"List<{self.config.model_prefix}{inner_type}{self.config.model_suffix}>"
+            return field_type
+
+        # 处理普通类型
+        if field_type not in base_types:
+            return f"{self.config.model_prefix}{field_type}{self.config.model_suffix}"
+
+        return field_type
 
     def _generate_endpoint_method(self, endpoint: ApiEndpoint, api_file: ApiFile, generated_models: Set[str]) -> str:
         """生成单个端点方法"""
@@ -707,19 +946,26 @@ class ApiCodeGenerator:
         return f"FLXGeneralApi<dynamic>"
 
     def _generate_method_params(self, endpoint: ApiEndpoint, api_file: ApiFile) -> str:
-        """生成方法参数"""
+        """生成方法参数
+
+        对于所有字段类型，都需要作为方法参数传递
+        - path/form/header 参数作为独立参数
+        - json 参数作为请求体字段，同时也需要参数传入
+        """
         params = []
 
         if endpoint.request_type and endpoint.request_type in api_file.structs:
             struct = api_file.structs[endpoint.request_type]
             for field in struct.fields:
-                if field.is_header:
+                # 跳过 header 参数（通常在拦截器中处理）
+                if field.tag_source == 'header':
                     continue
 
-                # 所有字段都使用可空类型
+                # 所有字段都使用可空类型，自定义类型添加 FLX 前缀
                 null_suffix = '?'
                 default_value = f" = {field.default}" if field.default else ''
-                params.append(f"{field.type}{null_suffix} {field.name}{default_value}")
+                prefixed_type = self._get_prefixed_type(field.type)
+                params.append(f"{prefixed_type}{null_suffix} {field.name}{default_value}")
 
         if not params:
             return ""
@@ -733,21 +979,33 @@ class ApiCodeGenerator:
         method_enum = f"FLXApiMethod.{endpoint.method.lower()}"
         api_constant = f"{self.config.api_prefix}Apis.{self._to_snake_case(endpoint.handler)}"
 
-        # 检查是否有请求体字段
-        has_body_fields = False
+        # 收集不同类型的字段
+        body_fields = []
+        header_fields = []
+        path_params = []
+        form_params = []
+
         if endpoint.request_type and endpoint.request_type in api_file.structs:
             struct = api_file.structs[endpoint.request_type]
-            body_fields = [f for f in struct.fields if not f.is_header]
-            has_body_fields = len(body_fields) > 0
+            for field in struct.fields:
+                if field.tag_source == 'header':
+                    header_fields.append(field)
+                elif field.tag_source == 'path':
+                    path_params.append(field)
+                elif field.tag_source == 'form':
+                    form_params.append(field)
+                else:
+                    body_fields.append(field)
 
-            if has_body_fields:
-                lines.append("final data = <String, dynamic>{")
-                for field in body_fields:
-                    # 使用 API 定义中的 json_name 作为 key（如 login_type, auth_code）
-                    # 保持与后端 API 的字段名一致
-                    json_key = field.json_name or field.name
-                    lines.append(f"  if ({field.name} != null) '{json_key}': {field.name},")
-                lines.append("};")
+        has_body_fields = len(body_fields) > 0
+
+        if has_body_fields:
+            lines.append("final data = <String, dynamic>{")
+            for field in body_fields:
+                # 使用 API 定义中的 json_name 作为 key
+                json_key = field.json_name or field.name
+                lines.append(f"  if ({field.name} != null) '{json_key}': {field.name},")
+            lines.append("};")
 
         # 生成 options
         if endpoint.response_type:
@@ -873,7 +1131,7 @@ class ApiGenerator:
             # 检查是否有空结构体被跳过
             for struct_name, struct in api_file.structs.items():
                 if struct.is_empty() and self.config.skip_empty_structs:
-                    if not struct.is_common_header and not struct_name.endswith('Req'):
+                    if not struct_name.endswith('Req'):
                         skipped_empty_structs.append(f"{api_file.module_name}.{struct_name}")
 
             if self._should_write_file(model_file):
