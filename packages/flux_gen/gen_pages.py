@@ -576,7 +576,7 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
     new_methods = []
     for method_name, const_name, name in new_entries:
         new_methods.append(f'  Future<T?> {method_name}<T>() => _getToNamed<T>(RoutePath.{const_name});')
-    
+
     methods_text = "\n".join(new_methods)
     # 在类末尾闭合前插入
     content = re.sub(
@@ -584,7 +584,7 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
         f'\n{methods_text}\n\\1',
         content
     )
-    
+
     ROUTE_NAVIGATOR_FILE.write_text(content, encoding="utf-8")
     return len(new_entries), len(skip_entries)
 
@@ -593,21 +593,21 @@ def update_main_tab_logic(tab_order):
     """更新 main_tab_logic.dart - 生成 Tab 枚举"""
     if not MAIN_TAB_LOGIC_FILE.exists():
         return
-    
+
     content = MAIN_TAB_LOGIC_FILE.read_text(encoding="utf-8")
     original_content = content
-    
+
     # 生成枚举
     enum_values = ", ".join(tab_order)
     enum_code = f"\nenum MainTab {{ {enum_values} }}\n"
-    
+
     # 生成 switchTo 方法
     switch_code = '''
   void switchTo(MainTab tab) {
     currentIndex.value = tab.index;
   }
 '''
-    
+
     # 在 import 后插入枚举
     if "enum MainTab" not in content:
         content = re.sub(
@@ -615,7 +615,7 @@ def update_main_tab_logic(tab_order):
             rf'\1{enum_code}',
             content
         )
-    
+
     # 插入 switchTo 方法
     if "void switchTo" not in content:
         content = re.sub(
@@ -623,7 +623,7 @@ def update_main_tab_logic(tab_order):
             rf'\1{switch_code}',
             content
         )
-    
+
     if content != original_content:
         MAIN_TAB_LOGIC_FILE.write_text(content, encoding="utf-8")
         print(f"已更新 {MAIN_TAB_LOGIC_FILE.name}")
@@ -640,10 +640,10 @@ def cmd_init():
     """init 命令 - 初始化路由配置文件"""
     created = []
     routes_dir = PROJECT_ROOT / "lib" / "routes"
-    
+
     # 确保 routes 目录存在
     routes_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # route_config.dart
     if not (routes_dir / "route_config.dart").exists():
         template_file = TEMPLATES_DIR / "route_config.dart.tmpl"
@@ -656,7 +656,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("route_config.dart")
-    
+
     # route_config.path.dart
     if not (routes_dir / "route_config.path.dart").exists():
         template_file = TEMPLATES_DIR / "route_config.path.dart.tmpl"
@@ -669,7 +669,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("route_config.path.dart")
-    
+
     # route_config.pages.dart
     if not (routes_dir / "route_config.pages.dart").exists():
         template_file = TEMPLATES_DIR / "route_config.pages.dart.tmpl"
@@ -682,7 +682,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("route_config.pages.dart")
-    
+
     # route_navigator.dart
     if not (routes_dir / "route_navigator.dart").exists():
         template_file = TEMPLATES_DIR / "route_navigator.dart.tmpl"
@@ -691,7 +691,7 @@ def cmd_init():
             (routes_dir / "route_navigator.dart").write_text(content, encoding="utf-8")
         else:
             (routes_dir / "route_navigator.dart").write_text(
-                "import 'package:fastkeyboard/routes/route_config.dart';\nimport 'package:get/get.dart';\n\nclass Nav {\n}\n",
+                "import 'package:{PACKAGE_NAME}/routes/route_config.dart';\nimport 'package:get/get.dart';\n\nclass Nav {\n}\n",
                 encoding="utf-8"
             )
         created.append("route_navigator.dart")

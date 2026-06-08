@@ -1,4 +1,5 @@
 {
   "prefix": "FLX",
-  "package": "None"
+  "package": "None",
+  "commonHeader": "CommonHeader"
 }

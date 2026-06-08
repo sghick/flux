@@ -16,6 +16,7 @@ API 代码生成器
 import os
 import re
 import sys
+import json
 import argparse
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Set
@@ -94,7 +95,7 @@ class ApiFile:
 # ==================== 配置类 ====================
 
 class GeneratorConfig:
-    """代码生成器配置（内嵌在代码中）"""
+    """代码生成器配置（支持从 gen_config.json 读取）"""
 
     # 默认配置
     DEFAULT_CONFIG = {
@@ -113,6 +114,7 @@ class GeneratorConfig:
         # API 配置
         'api_prefix': 'FLX',
         'api_suffix': 'Api',
+        'common_header': '',          # 公共请求头结构体名称（如：CommonHeader）
 
         # 代码风格配置
         'use_json_serializable': True,
@@ -133,6 +135,27 @@ class GeneratorConfig:
 
     def __init__(self, config_dict: Optional[Dict] = None):
         config = self.DEFAULT_CONFIG.copy()
+
+        # 尝试从 gen_config.json 读取配置
+        script_dir = Path(__file__).parent.resolve()
+        config_file = script_dir / 'gen_config.json'
+        if config_file.exists():
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    file_config = json.load(f)
+                    # 将 "None" 字符串转换为 None
+                    for key, value in list(file_config.items()):
+                        if value == 'None':
+                            file_config[key] = None
+                        # 处理配置键名转换（驼峰转蛇形）
+                        snake_key = self._camel_to_snake(key)
+                        if snake_key != key and snake_key not in file_config:
+                            file_config[snake_key] = value
+                    config.update(file_config)
+            except Exception as e:
+                print(f"警告: 读取 gen_config.json 失败: {e}")
+
+        # 如果传入了配置字典，则覆盖
         if config_dict:
             config.update(config_dict)
 
@@ -146,6 +169,7 @@ class GeneratorConfig:
         self.all_fields_nullable = config.get('all_fields_nullable', True)
         self.api_prefix = config.get('api_prefix', 'FLX')
         self.api_suffix = config.get('api_suffix', 'Api')
+        self.common_header = config.get('common_header', '')
         self.use_json_serializable = config.get('use_json_serializable', True)
         self.generate_comments = config.get('generate_comments', True)
         self.use_null_safety = config.get('use_null_safety', True)
@@ -159,6 +183,11 @@ class GeneratorConfig:
             'float': 'double',
             **config.get('type_mapping', {})
         }
+
+    def _camel_to_snake(self, camel_str: str) -> str:
+        """将驼峰命名转换为蛇形命名"""
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
+        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
 # ==================== Go-Zero API 解析器 ====================
@@ -277,9 +306,9 @@ class ApiParser:
         structs = {}
 
         # 找到所有 type (...) 块
-        type_pattern = r'type\s*\(([\s\S]*?)\)'
-        for type_match in re.finditer(type_pattern, content):
-            type_content = type_match.group(1)
+        # 使用自定义解析器而非正则，以正确处理 JSON tag 中的 ) 字符
+        type_blocks = self._find_type_blocks(content)
+        for type_content in type_blocks:
 
             # 解析每个结构体
             struct_pattern = r'(\w+)\s*\{([\s\S]*?)\}'
@@ -296,6 +325,63 @@ class ApiParser:
                 structs[struct_name] = struct
 
         return structs
+
+    def _find_type_blocks(self, content: str) -> List[str]:
+        """查找所有 type (...) 块的内容
+
+        使用自定义解析而非正则，以正确处理 JSON tag 中的 ) 字符。
+        Go API 文件中的 type块格式: type ( ... )
+        结构体字段的 JSON tag 可能是 `json:"field,optional"` 或 `form:"x,default=y)"`,
+        其中可能包含 ) 字符，正则的 non-greedy匹配会错误地在这些地方停止。
+        """
+        blocks = []
+        search_from = 0
+        while True:
+            #找 type ( 开头
+            start = content.find('type (', search_from)
+            if start == -1:
+                break
+            # type ( 之后开始匹配 content
+            open_paren_pos = start + len('type (')
+            # 跳过开括号
+            content_start = open_paren_pos
+            # 找匹配的闭括号（跳过引号内的 )）
+            close_pos = self._find_closing_paren(content, content_start)
+            if close_pos == -1:
+                break
+            blocks.append(content[content_start:close_pos])
+            search_from = close_pos + 1
+        return blocks
+
+    def _find_closing_paren(self, content: str, from_pos: int) -> int:
+        """从 from_pos 开始查找匹配的闭括号 )
+
+        跳过引号、反引号字符串以及注释中的 ) 字符。
+        """
+        i = from_pos
+        in_backtick = False
+        in_quote = False
+        while i < len(content):
+            c = content[i]
+            if c == '`' and not in_quote:
+                in_backtick = not in_backtick
+            elif c == '"' and not in_backtick:
+                if i > 0 and content[i - 1] == '\\':
+                    # 转义引号，不切换状态
+                    pass
+                elif in_quote:
+                    in_quote = False
+                else:
+                    in_quote = True
+            elif c == '/' and i + 1 < len(content) and content[i + 1] == '/':
+                # 跳过单行注释直到行尾
+                while i < len(content) and content[i] != '\n':
+                    i += 1
+                continue
+            elif c == ')' and not in_backtick and not in_quote:
+                return i
+            i += 1
+        return -1
 
     def _get_struct_comment(self, content: str, struct_name: str) -> str:
         """获取结构体前的注释"""
@@ -319,6 +405,7 @@ class ApiParser:
 
         格式: FieldName Type `tag:"value,optional"`
         支持的 tag: json, path, form, header
+        支持嵌入字段: CommonHeader  // comment (没有类型标注)
         """
         fields = []
 
@@ -331,56 +418,67 @@ class ApiParser:
             if not line or line.isspace():
                 continue
 
-            # 解析字段行: FieldName Type `tag:"value"`
-            # 支持多行 tag 的情况
-            field_pattern = r'^(\w+)\s+(\S+)\s*(.*)$'
-            match = re.match(field_pattern, line)
+            # 先提取注释（如果有）
+            comment = ""
+            comment_match = re.search(r'//\s*(.*)$', line)
+            if comment_match:
+                comment = comment_match.group(1).strip()
+                line = line[:comment_match.start()].strip()
 
-            if match:
-                field_name = match.group(1)
-                field_type = match.group(2)
-                rest = match.group(3).strip()
+            # 提取 tag（如果有）
+            tag_match = re.search(r'`([^`]+)`', line)
+            tag_str = None
+            if tag_match:
+                tag_str = tag_match.group(1)
+                line = line[:tag_match.start()].strip()
 
-                # 解析 Go struct tag
-                tag_match = re.search(r'`([^`]+)`', rest)
-                tag_source = "json"
-                json_name = None
-                optional = False
-                default = None
+            # 解析字段名和类型
+            parts = line.split()
+            if not parts:
+                continue
 
-                if tag_match:
-                    tag_str = tag_match.group(1)
-                    tag_source, json_name, optional, default = self._parse_field_tag(tag_str)
+            field_name = parts[0]
+            field_type = parts[1] if len(parts) > 1 else field_name  # 如果没有类型，使用字段名作为类型（嵌入字段）
 
-                # 处理数组类型和可空类型
-                is_array = field_type.startswith('[]')
-                is_pointer = field_type.startswith('*')
-                base_type = field_type[2:] if is_array else (field_type[1:] if is_pointer else field_type)
+            # 解析 Go struct tag
+            tag_source = "json"
+            json_name = None
+            optional = False
+            default = None
 
-                # 映射类型
-                dart_type = self._map_type(base_type)
-                if is_array:
-                    dart_type = f'List<{dart_type}>'
-                # Go 的 *Type 映射为 Dart 的 nullable
-                if is_pointer:
-                    optional = True
+            if tag_str:
+                tag_source, json_name, optional, default = self._parse_field_tag(tag_str)
 
-                # Go 字段名保持原样，Dart 属性名转驼峰
-                dart_field_name = self._to_camel_case(field_name)
+            # 处理数组类型和可空类型
+            is_array = field_type.startswith('[]')
+            is_pointer = field_type.startswith('*')
+            base_type = field_type[2:] if is_array else (field_type[1:] if is_pointer else field_type)
 
-                # 对于 path/form/header 参数，Dart 属性名使用原始名称
-                if tag_source in ('path', 'form', 'header'):
-                    dart_field_name = field_name.lower()
+            # 映射类型
+            dart_type = self._map_type(base_type)
+            if is_array:
+                dart_type = f'List<{dart_type}>'
+            # Go 的 *Type 映射为 Dart 的 nullable
+            if is_pointer:
+                optional = True
 
-                fields.append(ApiField(
-                    name=dart_field_name,
-                    go_name=field_name,
-                    type=dart_type,
-                    tag_source=tag_source,
-                    json_name=json_name or self._to_snake_case(field_name),
-                    optional=optional,
-                    default=default
-                ))
+            # Go 字段名保持原样，Dart 属性名转驼峰
+            dart_field_name = self._to_camel_case(field_name)
+
+            # 对于 path/form/header 参数，Dart 属性名使用原始名称
+            if tag_source in ('path', 'form', 'header'):
+                dart_field_name = field_name.lower()
+
+            fields.append(ApiField(
+                name=dart_field_name,
+                go_name=field_name,
+                type=dart_type,
+                tag_source=tag_source,
+                json_name=json_name or self._to_snake_case(field_name),
+                optional=optional,
+                default=default,
+                comment=comment
+            ))
 
         return fields
 
@@ -602,7 +700,34 @@ class ApiParser:
         if api_type[0].isupper():
             return api_type
 
+        # 处理 Go map 类型: map[K]V -> Map<K, V>
+        if api_type.startswith('map['):
+            # 解析 map[key]value 格式
+            match = re.match(r'map\[(\w+)\](\w+)', api_type)
+            if match:
+                key_type = match.group(1)
+                value_type = match.group(2)
+                dart_key = self._map_go_type(key_type)
+                dart_value = self._map_go_type(value_type)
+                return f'Map<{dart_key}, {dart_value}>'
+
         return self.config.type_mapping.get(api_type, api_type)
+
+    def _map_go_type(self, go_type: str) -> str:
+        """映射 Go 基础类型到 Dart 类型"""
+        mapping = {
+            'string': 'String',
+            'int': 'int',
+            'int64': 'int',
+            'int32': 'int',
+            'int16': 'int',
+            'bool': 'bool',
+            'float64': 'double',
+            'float32': 'double',
+            'float': 'double',
+            'any': 'dynamic',
+        }
+        return mapping.get(go_type, go_type)
 
     def _to_camel_case(self, name: str) -> str:
         """将 snake_case 或 PascalCase 转换为 camelCase"""
@@ -613,9 +738,30 @@ class ApiParser:
         return components[0].lower() + ''.join(x.capitalize() for x in components[1:])
 
     def _to_snake_case(self, camel_str: str) -> str:
-        """将 camelCase 或 PascalCase 转换为 snake_case"""
+        """转换为 snake_case"""
         s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
         return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+    def _collect_common_header_fields(self, all_api_files: List[ApiFile]):
+        """收集所有 API 文件中的 CommonHeader 字段
+
+        CommonHeader 字段包括：
+        - 字段的原始 Go 名称（go_name）
+        - 字段的 Dart 属性名（name，可能被转小写）
+        """
+        if not self.config.common_header:
+            return
+
+        for api_file in all_api_files:
+            if self.config.common_header in api_file.structs:
+                struct = api_file.structs[self.config.common_header]
+                for field in struct.fields:
+                    # 添加 Go 原始字段名
+                    self.common_header_fields.add(field.go_name)
+                    # 添加 Dart 属性名（可能被转小写，特别是 header 类型）
+                    self.common_header_fields.add(field.name)
+                    # 添加 snake_case 格式的字段名
+                    self.common_header_fields.add(self._to_snake_case(field.go_name))
 
 
 # ==================== 代码生成器 ====================
@@ -725,6 +871,7 @@ class ModelGenerator:
         - 普通类型: QuoteDrop -> FLXQuoteDrop
         - 指针类型: *QuoteDrop -> FLXQuoteDrop
         - 数组类型: List<QuoteDrop> -> List<FLXQuoteDrop>
+        - Map 类型: Map<String, String> -> Map<String, String> (不添加前缀)
         """
         # 检查是否是基本类型
         base_types = {'String', 'int', 'double', 'bool', 'dynamic', 'Object'}
@@ -737,9 +884,13 @@ class ModelGenerator:
         # 处理 List<T> 类型
         if field_type.startswith('List<') and field_type.endswith('>'):
             inner_type = field_type[5:-1]  # 提取 T
-            if inner_type not in base_types:
+            if inner_type not in base_types and not inner_type.startswith('Map<'):
                 # 自定义类型，添加前缀
                 return f"List<{self.config.model_prefix}{inner_type}{self.config.model_suffix}>"
+            return field_type
+
+        # 处理 Map<K, V> 类型 - Map 是内置类型，不添加前缀
+        if field_type.startswith('Map<') and field_type.endswith('>'):
             return field_type
 
         # 处理普通类型
@@ -951,6 +1102,8 @@ class ApiCodeGenerator:
         对于所有字段类型，都需要作为方法参数传递
         - path/form/header 参数作为独立参数
         - json 参数作为请求体字段，同时也需要参数传入
+
+        注意：如果配置了 commonHeader，会跳过类型为 commonHeader 的字段
         """
         params = []
 
@@ -959,6 +1112,10 @@ class ApiCodeGenerator:
             for field in struct.fields:
                 # 跳过 header 参数（通常在拦截器中处理）
                 if field.tag_source == 'header':
+                    continue
+
+                # 跳过类型为 commonHeader 的字段
+                if self.config.common_header and field.type == self.config.common_header:
                     continue
 
                 # 所有字段都使用可空类型，自定义类型添加 FLX 前缀
@@ -973,7 +1130,10 @@ class ApiCodeGenerator:
         return "{\n    " + ",\n    ".join(params) + "\n  }"
 
     def _generate_method_body(self, endpoint: ApiEndpoint, api_file: ApiFile) -> str:
-        """生成方法体"""
+        """生成方法体
+
+        注意：如果配置了 commonHeader，会跳过类型为 commonHeader 的字段
+        """
         lines = []
 
         method_enum = f"FLXApiMethod.{endpoint.method.lower()}"
@@ -988,6 +1148,10 @@ class ApiCodeGenerator:
         if endpoint.request_type and endpoint.request_type in api_file.structs:
             struct = api_file.structs[endpoint.request_type]
             for field in struct.fields:
+                # 跳过类型为 commonHeader 的字段
+                if self.config.common_header and field.type == self.config.common_header:
+                    continue
+
                 if field.tag_source == 'header':
                     header_fields.append(field)
                 elif field.tag_source == 'path':
@@ -1134,7 +1298,15 @@ class ApiGenerator:
                     if not struct_name.endswith('Req'):
                         skipped_empty_structs.append(f"{api_file.module_name}.{struct_name}")
 
-            if self._should_write_file(model_file):
+            # 如果没有生成任何结构体，跳过 model 文件生成
+            if not generated_structs:
+                if model_file.exists():
+                    os.remove(model_file)
+                    print(f"  [删除] {model_file.name} (无结构体)")
+                else:
+                    print(f"  [跳过] {api_file.module_name}_model.dart (无结构体)")
+                skipped_files.append(f"[Model] {model_file.name}")
+            elif self._should_write_file(model_file):
                 with open(model_file, 'w', encoding='utf-8') as f:
                     f.write(model_code)
                 generated_files.append(f"[Model] {model_file.name}")
