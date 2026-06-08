@@ -1,5 +1,6 @@
 {
   "prefix": "FLX",
   "package": "None",
+  "modelFieldRename": "FieldRename.none",
   "commonHeader": "CommonHeader"
 }

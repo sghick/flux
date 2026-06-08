@@ -107,6 +107,7 @@ class GeneratorConfig:
         # 模型配置
         'model_prefix': 'FLX',        # 结构体名前缀（如：FLX）
         'model_suffix': '',           # 结构体名后缀
+        'model_field_rename': '',     #
         'skip_req_models': True,
         'skip_empty_structs': True,   # 跳过空结构体
         'all_fields_nullable': True,  # 所有字段设置为可空类型
@@ -164,6 +165,7 @@ class GeneratorConfig:
         self.package_name = config.get('package_name')
         self.model_prefix = config.get('model_prefix', '')
         self.model_suffix = config.get('model_suffix', '')
+        self.model_field_rename = config.get('model_field_rename', '')
         self.skip_req_models = config.get('skip_req_models', True)
         self.skip_empty_structs = config.get('skip_empty_structs', True)
         self.all_fields_nullable = config.get('all_fields_nullable', True)
@@ -910,7 +912,7 @@ class ModelGenerator:
             lines.append(f"/// {struct.comment}")
 
         if self.config.use_json_serializable:
-            lines.append("@JsonSerializable(fieldRename: FieldRename.snake)")
+            lines.append(f"@JsonSerializable(fieldRename: {self.config.model_field_rename})")
 
         lines.append(f"class {class_name} {{")
 
