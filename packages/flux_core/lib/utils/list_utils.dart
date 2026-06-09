@@ -26,8 +26,8 @@ extension FLXListExt<T> on List<T> {
     return list;
   }
 
-  List<V> pickerNonnull<V>() {
-    return picker((v) => v as V);
+  List<T> pickerNonnull() {
+    return picker((v) => v);
   }
 
   Map<K, V> toMap<K, V>(ListToMapCondition<T> condition) {
