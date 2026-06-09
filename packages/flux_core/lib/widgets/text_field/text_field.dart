@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../styles/text_style/text_style_builder.dart';
-import '../../utils/screen_utils.dart';
 
 class FLXTextField extends StatelessWidget {
   final bool hasClear;
@@ -168,13 +168,13 @@ class FLXTextField extends StatelessWidget {
       child: logic.showPwd.value
           ? passwordVisibleIcon ??
                 Container(
-                  padding: EdgeInsets.symmetric(horizontal: 5.dp),
-                  child: Icon(Icons.visibility, size: 16.dp, color: color),
+                  padding: EdgeInsets.symmetric(horizontal: 5.r),
+                  child: Icon(Icons.visibility, size: 16.r, color: color),
                 )
           : passwordInvisibleIcon ??
                 Container(
-                  padding: EdgeInsets.symmetric(horizontal: 5.dp),
-                  child: Icon(Icons.visibility_off, size: 16.dp, color: color),
+                  padding: EdgeInsets.symmetric(horizontal: 5.r),
+                  child: Icon(Icons.visibility_off, size: 16.r, color: color),
                 ),
       onTap: () {
         logic.switchShowPwd();
@@ -192,8 +192,8 @@ class FLXTextField extends StatelessWidget {
                 child:
                     clearIcon ??
                     Container(
-                      padding: EdgeInsets.symmetric(horizontal: 5.dp),
-                      child: Icon(Icons.clear, size: 16.dp, color: color),
+                      padding: EdgeInsets.symmetric(horizontal: 5.r),
+                      child: Icon(Icons.clear, size: 16.r, color: color),
                     ),
               )
             : Container();

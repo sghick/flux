@@ -57,7 +57,6 @@ export 'utils/map_utils.dart';
 export 'utils/math_util.dart';
 export 'utils/number_utils.dart';
 export 'utils/pref_utils.dart';
-export 'utils/screen_utils.dart';
 export 'utils/storage_utils.dart';
 export 'utils/string_utils.dart';
 export 'utils/ui_utils.dart';

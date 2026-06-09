@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-
-import '../utils/screen_utils.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 class FLXSwitch extends StatelessWidget {
   final double? width;
@@ -26,5 +25,5 @@ class FLXSwitch extends StatelessWidget {
   }
 
   static FLXSwitch defaultSwitch({Color? activeColor, required bool isOn, ValueChanged<bool>? onChanged}) =>
-      FLXSwitch(width: 33.dp, height: 19.dp, scale: 0.65, activeColor: activeColor ?? const Color(0xFF009CFF), isOn: isOn, onChanged: onChanged);
+      FLXSwitch(width: 33.r, height: 19.r, scale: 0.65, activeColor: activeColor ?? const Color(0xFF009CFF), isOn: isOn, onChanged: onChanged);
 }

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../styles/text_style/text_style_builder.dart';
 import '../../styles/text_style/text_style_font.dart';
 import '../../utils/date_utils.dart';
-import '../../utils/screen_utils.dart';
 import '../buttons/text.dart';
 
 class FLXDatePicker extends StatefulWidget {
@@ -35,7 +35,7 @@ class _FLXDatePickerState extends State<FLXDatePicker> {
   late final DateTime maxDate;
   late final DateTime currentDate;
 
-  final double itemHeight = 30.dp;
+  final double itemHeight = 30.r;
   final double magnification = 1.2;
 
   List<int> yearSource = [];
@@ -123,7 +123,7 @@ class _FLXDatePickerState extends State<FLXDatePicker> {
             height: itemHeight * magnification,
             decoration: BoxDecoration(
               color: Colors.grey.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(10.dp),
+              borderRadius: BorderRadius.circular(10.r),
             ),
           ),
         ),
@@ -275,7 +275,7 @@ class _FLXDatePickerState extends State<FLXDatePicker> {
       alignment: Alignment.center,
       child: FLXText(
         text,
-        style: TextStyleBuilder().size(14.dp).color(Colors.black).w500,
+        style: TextStyleBuilder().size(14.r).color(Colors.black).w500,
       ),
     );
   }
