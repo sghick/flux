@@ -119,3 +119,5 @@ export 'widgets/wheel_picker/wheel_picker.dart';
 
 // Misc
 export 'widgets/switch.dart';
+
+export 'package:flutter_screenutil/flutter_screenutil.dart';
