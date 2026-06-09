@@ -14,7 +14,7 @@ List<T>? toNullableList<T>(dynamic obj) {
   return null;
 }
 
-extension FLXListExt<T> on List<T> {
+extension FLXListExt<T> on List<T?> {
   List<V> picker<V>(FilterListCondition<V, T> condition) {
     List<V> list = [];
     forEach((e) {
@@ -26,7 +26,7 @@ extension FLXListExt<T> on List<T> {
     return list;
   }
 
-  List<V> pickerNonnull<V?>() {
+  List<T> pickerNonnull() {
     return picker((v) => v);
   }
 
