@@ -26,7 +26,7 @@ extension FLXListExt<T> on List<T> {
     return list;
   }
 
-  List<T> pickerNonnull() {
+  List<V> pickerNonnull<V?>() {
     return picker((v) => v);
   }
 
