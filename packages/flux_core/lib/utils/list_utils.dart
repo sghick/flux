@@ -2,7 +2,7 @@ import 'dart:async';
 
 typedef FilterListCondition<V, T> = V? Function(T obj);
 typedef ListToMapCondition<T> = MapEntry? Function(T obj);
-typedef CBListIndexedBuilder = Function(int index);
+typedef ListIndexedBuilder = Function(int index);
 
 List<T>? toNullableList<T>(dynamic obj) {
   if (obj is T) {
@@ -37,7 +37,7 @@ extension FLXListExt<T> on List<T> {
     return ret;
   }
 
-  List<T> joinSeparator(CBListIndexedBuilder builder) {
+  List<T> joinSeparator(ListIndexedBuilder builder) {
     List<T> list = [];
     for (var i = 0; i < length; i++) {
       var e = this[i];
