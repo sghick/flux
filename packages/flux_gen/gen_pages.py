@@ -756,10 +756,39 @@ def cmd_init():
         print("所有文件已存在，无需初始化")
 
 
+def cmd_routes():
+    """routes 命令 - 更新路由配置"""
+    config = load_config()
+    pages = parse_pages(config.get("pages", []))
+    tab_order = config.get("tabOrder", [])
+    main_tab = config.get("main_tab", None)
+    
+    print("路由配置更新：")
+    print("=" * 50)
+    
+    # 统计并显示 path 更新
+    new_path, skip_path = update_route_config_path(pages, main_tab, verbose=True)
+    
+    # 统计并显示 pages 更新
+    new_pages, skip_pages = update_route_config_pages(pages, main_tab, verbose=True)
+    
+    # 统计并显示 navigator 更新
+    new_nav, skip_nav = update_route_navigator(pages, main_tab, verbose=True)
+    
+    # main_tab_logic
+    update_main_tab_logic(tab_order)
+    
+    print("=" * 50)
+    print(f"路径常量: \033[32m新增 {new_path}\033[0m | \033[33m既存 {skip_path}\033[0m")
+    print(f"页面配置: \033[32m新增 {new_pages}\033[0m | \033[33m既存 {skip_pages}\033[0m")
+    print(f"导航方法: \033[32m新增 {new_nav}\033[0m | \033[33m既存 {skip_nav}\033[0m")
+    print("路由配置更新完成")
+
+
 def main():
     if len(sys.argv) < 2:
         print("用法: python3 gen_pages.py <command>")
-        print("命令: check, generate, tree, routes, init")
+        print("命令: check, pages, generate, tree, routes, init")
         sys.exit(1)
     
     command = sys.argv[1]
@@ -768,32 +797,7 @@ def main():
         cmd_init()
         
     elif command == "routes":
-        # 更新路由配置
-        config = load_config()
-        pages = parse_pages(config.get("pages", []))
-        tab_order = config.get("tabOrder", [])
-        main_tab = config.get("main_tab", None)
-        
-        print("路由配置更新：")
-        print("=" * 50)
-        
-        # 统计并显示 path 更新
-        new_path, skip_path = update_route_config_path(pages, main_tab, verbose=True)
-        
-        # 统计并显示 pages 更新
-        new_pages, skip_pages = update_route_config_pages(pages, main_tab, verbose=True)
-        
-        # 统计并显示 navigator 更新
-        new_nav, skip_nav = update_route_navigator(pages, main_tab, verbose=True)
-        
-        # main_tab_logic
-        update_main_tab_logic(tab_order)
-        
-        print("=" * 50)
-        print(f"路径常量: \033[32m新增 {new_path}\033[0m | \033[33m既存 {skip_path}\033[0m")
-        print(f"页面配置: \033[32m新增 {new_pages}\033[0m | \033[33m既存 {skip_pages}\033[0m")
-        print(f"导航方法: \033[32m新增 {new_nav}\033[0m | \033[33m既存 {skip_nav}\033[0m")
-        print("路由配置更新完成")
+        cmd_routes()
         
     elif command == "check":
         config = load_config()
@@ -805,16 +809,29 @@ def main():
     elif command == "tree":
         cmd_tree()
         
-    elif command == "generate":
+    elif command == "pages":
+        # 原 generate 功能：只生成页面文件
         config = load_config()
         pages = parse_pages(config.get("pages", []))
         tab_order = config.get("tabOrder", [])
         main_tab = config.get("main_tab", None)
         cmd_generate(pages, tab_order, main_tab)
         
+    elif command == "generate":
+        # 新 generate 功能：routes + pages
+        print("生成页面文件...")
+        config = load_config()
+        pages = parse_pages(config.get("pages", []))
+        tab_order = config.get("tabOrder", [])
+        main_tab = config.get("main_tab", None)
+        cmd_generate(pages, tab_order, main_tab)
+        print()
+        print("更新路由配置...")
+        cmd_routes()
+        
     else:
         print(f"未知命令: {command}")
-        print("可用命令: check, generate, tree, routes")
+        print("可用命令: check, pages, generate, tree, routes, init")
         sys.exit(1)
 
 
