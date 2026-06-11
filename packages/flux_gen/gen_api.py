@@ -126,6 +126,7 @@ class GeneratorConfig:
         'type_mapping': {
             'string': 'String',
             'int': 'int',
+            'int32': 'int',
             'int64': 'int',
             'bool': 'bool',
             'float64': 'double',
@@ -178,6 +179,7 @@ class GeneratorConfig:
         self.type_mapping = {
             'string': 'String',
             'int': 'int',
+            'int32': 'int',
             'int64': 'int',
             'bool': 'bool',
             'float64': 'double',
@@ -387,19 +389,16 @@ class ApiParser:
 
     def _get_struct_comment(self, content: str, struct_name: str) -> str:
         """获取结构体前的注释"""
-        # 查找结构体定义位置前的注释
-        pattern = rf'(\w+)\s*\{{'
-        for match in re.finditer(pattern, content):
-            if match.group(1) == struct_name:
-                # 获取匹配位置前的文本
-                start = max(0, match.start() - 200)
-                text_before = content[start:match.start()]
-
-                # 查找最后一个 // 注释
-                comment_match = re.search(r'//\s*(.+)$', text_before, re.MULTILINE)
-                if comment_match:
-                    return comment_match.group(1).strip()
-
+        lines = content.split('\n')
+        for i, line in enumerate(lines):
+            #查找结构体定义行: StructName { ...
+            if struct_name in line and '{' in line:
+                # 向前搜索最多 10 行，找到最近的非空 // 注释
+                for j in range(max(0, i - 10), i):
+                    prev_line = lines[j].strip()
+                    if prev_line.startswith('//') and len(prev_line) > 2:
+                        return prev_line[2:].strip()
+                break
         return ""
 
     def _parse_fields(self, body: str) -> List[ApiField]:
@@ -642,6 +641,20 @@ class ApiParser:
             handler_match = re.match(r'@handler\s+(\w+)', line)
             if handler_match:
                 handler_name = handler_match.group(1)
+
+                # 解析 @doc（可能在同行或前一行）
+                doc = ""
+                # 检查同行是否有 @doc
+                doc_match = re.search(r'@doc\s+"([^"]+)"', line)
+                if doc_match:
+                    doc = doc_match.group(1)
+                # 检查前一行是否有 @doc
+                elif i > 0:
+                    prev_line = lines[i - 1].strip()
+                    doc_match = re.search(r'@doc\s+"([^"]+)"', prev_line)
+                    if doc_match:
+                        doc = doc_match.group(1)
+
                 i += 1
 
                 # 下一行应该是 HTTP 方法定义
@@ -652,6 +665,7 @@ class ApiParser:
                     endpoint = self._parse_endpoint_line(method_line)
                     if endpoint:
                         endpoint.handler = handler_name
+                        endpoint.doc = doc
                         endpoints.append(endpoint)
 
             i += 1
