@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import 'api_cache.dart';
 import 'api_enums.dart';
 import 'api_request_serializer.dart';
 import 'api_response_serializer.dart';
@@ -25,6 +26,9 @@ class FLXApiOptions {
   FLXApiResponseSerializer? responseSerializer;
   final FLXTypeParser? typeParser;
 
+  /// 缓存策略配置
+  final FLXApiCachePolicy? cachePolicy;
+
   FLXApiOptions(
     this.method,
     this.path, {
@@ -42,6 +46,7 @@ class FLXApiOptions {
     this.requestSerializer,
     this.responseSerializer,
     this.typeParser,
+    this.cachePolicy,
   }) : toastBlackCodes = {} {
     if (initialToastBlackCodes != null) {
       toastBlackCodes.addAll(initialToastBlackCodes!);
