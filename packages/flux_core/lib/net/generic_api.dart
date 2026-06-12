@@ -21,7 +21,7 @@ class FLXGeneralApi<T> extends FLXCommonApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) {
     return query<T>(
       cancelToken: cancelToken,

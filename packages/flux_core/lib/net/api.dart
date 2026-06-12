@@ -37,14 +37,14 @@ abstract class FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   });
 
   Future<List<T>?> queryList<T>({
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) {
     return query(cancelToken: cancelToken, onSendProgress: onSendProgress, onReceiveProgress: onReceiveProgress, onDataSource: onDataSource).then((
       value,
@@ -68,7 +68,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     final cachePolicy = options.cachePolicy;
 
@@ -101,7 +101,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     // 使用请求去重
     return _cache.getOrCreate<T>(cacheKey, () async {
@@ -162,7 +162,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     // 1. 尝试从缓存读取原始数据
     final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
@@ -198,7 +198,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     // 1. 检查缓存
     final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
@@ -247,7 +247,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     try {
       // 1. 优先网络请求
@@ -285,7 +285,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     final result = await _queryNetwork<T>(
       cancelToken: cancelToken,
@@ -303,7 +303,7 @@ abstract class FLXCommonApi extends FLXApi {
   }
 
   /// cacheOnly - 仅缓存
-  Future<T?> _cacheOnlyStrategy<T>(String cacheKey, FLXApiCachePolicy cachePolicy, {FLXDataCallback? onDataSource}) async {
+  Future<T?> _cacheOnlyStrategy<T>(String cacheKey, FLXApiCachePolicy cachePolicy, {FLXDataCallback<T>? onDataSource}) async {
     final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
     if (cachedData != null) {
       logT("Cache HIT (cacheOnly): $cacheKey");
@@ -341,7 +341,7 @@ abstract class FLXCommonApi extends FLXApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
-    FLXDataCallback? onDataSource,
+    FLXDataCallback<T>? onDataSource,
   }) async {
     final methodName = options.method.name.toUpperCase();
     try {
