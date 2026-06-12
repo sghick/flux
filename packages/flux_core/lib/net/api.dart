@@ -11,7 +11,7 @@ import 'api_request_serializer.dart';
 import 'api_response_serializer.dart';
 
 /// 通过此回调获取数据，适用于所有策略中需要两次（缓存+网络）数据回调的场景
-typedef FLXDataCallback<T> = void Function<T>(bool fromCache, T? data);
+typedef FLXDataCallback<T> = void Function(bool fromCache, T? data);
 
 abstract class FLXApi {
   final FLXApiOptions options;
