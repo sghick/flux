@@ -26,6 +26,16 @@ abstract class FLXApiResponseSerializer<T> {
     }
   }
 
+  /// 直接解析响应数据（用于缓存读取后反序列化）
+  U? parseResponse<U>(dynamic respData, FLXApi api) {
+    try {
+      return _handleTypedResponse(respData) as U?;
+    } catch (e) {
+      // 缓存数据解析失败，返回原始数据
+      return respData as U?;
+    }
+  }
+
   /// 处理类型化响应
   dynamic _handleTypedResponse(dynamic respData) {
     if (respData == null) {

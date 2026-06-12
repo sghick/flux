@@ -9,7 +9,9 @@ import 'api_options.dart';
 
 /// 缓存条目类，封装缓存数据和元数据
 class FLXApiCacheEntry<T> {
-  /// 缓存数据（原始数据，由序列化器统一处理）
+  /// 缓存数据
+  /// - 内存缓存：存储原始 model 对象
+  /// - 磁盘缓存：存储 jsonDecode 后的 Map 数据
   final T data;
 
   /// 缓存时间
@@ -46,7 +48,8 @@ class FLXApiCacheEntry<T> {
   }
 
   /// 转为 JSON（用于磁盘存储）
-  Map<String, dynamic> toJson(dynamic data) {
+  /// data 应该是已经序列化后的 json 字符串
+  Map<String, dynamic> toJson() {
     return {
       'data': data is String ? data : jsonEncode(data),
       'cacheTime': cacheTime.toIso8601String(),
@@ -57,9 +60,12 @@ class FLXApiCacheEntry<T> {
 }
 
 /// 从 JSON 创建缓存条目（用于磁盘读取）
-FLXApiCacheEntry<dynamic> createCacheEntryFromJson(Map<String, dynamic> json) {
-  return FLXApiCacheEntry<dynamic>(
-    data: json['data'] is String ? json['data'] : jsonDecode(json['data']),
+FLXApiCacheEntry<Map<String, dynamic>> createCacheEntryFromJson(Map<String, dynamic> json) {
+  // data 存储的是 jsonEncode 后的字符串，取出时 jsonDecode 回 Map
+  final dataStr = json['data'];
+  final data = dataStr is String ? jsonDecode(dataStr) : dataStr;
+  return FLXApiCacheEntry<Map<String, dynamic>>(
+    data: data is Map<String, dynamic> ? data : (data as List).cast<Map<String, dynamic>>().first,
     cacheTime: DateTime.parse(json['cacheTime']),
     expireTime: json['expireTime'] != null ? DateTime.parse(json['expireTime']) : null,
     headers: json['headers'] != null ? Map<String, dynamic>.from(json['headers']) : null,
@@ -165,8 +171,8 @@ class FLXApiCache {
 
   /// 从缓存读取
   /// 读取顺序：内存缓存 -> 磁盘缓存
-  /// 若从磁盘读取，会自动回填内存缓存
-  Future<T?> get<T>(String key, {FLXApiCachePolicy? policy}) async {
+  /// 返回：原始序列化数据（json 字符串或 Map），需要通过 responseSerializer 反序列化
+  Future<dynamic> get(String key, {FLXApiCachePolicy? policy}) async {
     // 1. 先检查内存缓存
     if (policy?.hasMemoryCache ?? true) {
       final entry = _memoryCache[key];
@@ -175,7 +181,7 @@ class FLXApiCache {
         // 移动到末尾（LRU 更新）
         _memoryCache.remove(key);
         _memoryCache[key] = entry;
-        return entry.data as T;
+        return entry.data; // 返回序列化后的数据
       } else if (entry != null) {
         // 已过期，删除
         _memoryCache.remove(key);
@@ -193,7 +199,7 @@ class FLXApiCache {
           final entry = createCacheEntryFromJson(json);
           if (!entry.isExpired) {
             _diskHitCount++;
-            // 回填内存缓存
+            // 回填内存缓存（存储 jsonDecode 后的数据）
             if (policy?.hasMemoryCache ?? true) {
               await _setMemoryCache(
                 key,
@@ -201,7 +207,7 @@ class FLXApiCache {
                 expireTime: entry.expireTime,
               );
             }
-            return entry.data as T;
+            return entry.data; // 返回 jsonDecode 后的原始数据
           } else {
             // 已过期，删除
             await _prefs?.remove('$_diskCachePrefix$key');
@@ -217,16 +223,17 @@ class FLXApiCache {
   }
 
   /// 写入缓存
-  /// 写入顺序：内存缓存 -> 磁盘缓存（根据 level 配置）
-  Future<void> set<T>(
+  /// data 是已经序列化后的数据（json 字符串或 Map）
+  /// 写入磁盘时会进一步 jsonEncode
+  Future<void> set(
     String key,
-    T data, {
+    dynamic data, {
     FLXApiCachePolicy? policy,
     Map<String, dynamic>? headers,
   }) async {
     final now = DateTime.now();
 
-    // 1. 写入内存缓存
+    // 1. 写入内存缓存（存储序列化后的数据）
     if (policy?.hasMemoryCache ?? true) {
       await _setMemoryCache(
         key,
@@ -240,13 +247,14 @@ class FLXApiCache {
     if (policy?.hasDiskCache ?? true) {
       await _ensureInitialized();
       final entry = FLXApiCacheEntry<dynamic>(
-        data: data,
+        data: data, // 存储序列化后的数据
         cacheTime: now,
         expireTime: policy?.diskExpireTime,
         headers: headers,
         source: FLXApiCacheLevel.diskOnly,
       );
-      final jsonStr = jsonEncode(entry.toJson(data));
+      // 写入时再次 jsonEncode（因为内存缓存可能已经是字符串）
+      final jsonStr = jsonEncode(entry.toJson());
       await _prefs?.setString('$_diskCachePrefix$key', jsonStr);
     }
   }

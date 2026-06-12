@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flux_core/log/logger.dart';
 
@@ -100,11 +102,12 @@ abstract class FLXCommonApi extends FLXApi {
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
   }) async {
-    // 1. 尝试从缓存读取
-    final cached = await _cache.get<T>(cacheKey, policy: cachePolicy);
-    if (cached != null) {
+    // 1. 尝试从缓存读取原始数据
+    final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
+    if (cachedData != null) {
       logT("Cache HIT (cacheFirst): $cacheKey");
-      return cached;
+      // 通过序列化器反序列化
+      return _deserializeCacheData<T>(cachedData);
     }
 
     // 2. 缓存未命中，发起网络请求
@@ -115,9 +118,9 @@ abstract class FLXCommonApi extends FLXApi {
       onReceiveProgress: onReceiveProgress,
     );
 
-    // 3. 写入缓存
+    // 3. 写入缓存（存储序列化后的数据）
     if (result != null) {
-      await _cache.set<T>(cacheKey, result, policy: cachePolicy);
+      await _cache.set(cacheKey, result, policy: cachePolicy);
     }
 
     return result;
@@ -132,8 +135,8 @@ abstract class FLXCommonApi extends FLXApi {
     ProgressCallback? onReceiveProgress,
   }) async {
     // 1. 检查缓存
-    final cached = await _cache.get<T>(cacheKey, policy: cachePolicy);
-    if (cached != null) {
+    final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
+    if (cachedData != null) {
       logT("Cache HIT (cacheThenNetwork): $cacheKey, returning immediately");
 
       // 2. 缓存命中：立即返回缓存数据，同时异步更新缓存
@@ -143,13 +146,14 @@ abstract class FLXCommonApi extends FLXApi {
         onReceiveProgress: onReceiveProgress,
       ).then((result) {
         if (result != null) {
-          _cache.set<T>(cacheKey, result, policy: cachePolicy);
+          _cache.set(cacheKey, result, policy: cachePolicy);
         }
       }).catchError((_) {
         // 忽略网络请求错误，不影响主流程
       });
 
-      return cached;
+      // 通过序列化器反序列化
+      return _deserializeCacheData<T>(cachedData);
     }
 
     // 3. 缓存未命中：等待网络请求返回
@@ -162,7 +166,7 @@ abstract class FLXCommonApi extends FLXApi {
 
     // 4. 写入缓存
     if (result != null) {
-      await _cache.set<T>(cacheKey, result, policy: cachePolicy);
+      await _cache.set(cacheKey, result, policy: cachePolicy);
     }
 
     return result;
@@ -186,17 +190,17 @@ abstract class FLXCommonApi extends FLXApi {
 
       // 2. 写入缓存
       if (result != null) {
-        await _cache.set<T>(cacheKey, result, policy: cachePolicy);
+        await _cache.set(cacheKey, result, policy: cachePolicy);
       }
 
       return result;
     } catch (e) {
       // 3. 网络请求失败，尝试使用缓存
       logT("Network failed (networkThenCache): $cacheKey, trying cache");
-      final cached = await _cache.get<T>(cacheKey, policy: cachePolicy);
-      if (cached != null) {
+      final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
+      if (cachedData != null) {
         logT("Cache HIT (networkThenCache fallback): $cacheKey");
-        return cached;
+        return _deserializeCacheData<T>(cachedData);
       }
       rethrow;
     }
@@ -218,7 +222,7 @@ abstract class FLXCommonApi extends FLXApi {
 
     // 写入缓存
     if (result != null) {
-      await _cache.set<T>(cacheKey, result, policy: cachePolicy);
+      await _cache.set(cacheKey, result, policy: cachePolicy);
     }
 
     return result;
@@ -226,13 +230,34 @@ abstract class FLXCommonApi extends FLXApi {
 
   /// cacheOnly - 仅缓存
   Future<T?> _cacheOnlyStrategy<T>(String cacheKey, FLXApiCachePolicy cachePolicy) async {
-    final cached = await _cache.get<T>(cacheKey, policy: cachePolicy);
-    if (cached != null) {
+    final cachedData = await _cache.get(cacheKey, policy: cachePolicy);
+    if (cachedData != null) {
       logT("Cache HIT (cacheOnly): $cacheKey");
-      return cached;
+      return _deserializeCacheData<T>(cachedData);
     }
     logT("Cache MISS (cacheOnly): $cacheKey");
     return null;
+  }
+
+  /// 反序列化缓存数据
+  /// cachedData 可能是序列化后的 json 字符串或原始 Map
+  T? _deserializeCacheData<T>(dynamic cachedData) {
+    // 如果是字符串，尝试 jsonDecode
+    if (cachedData is String) {
+      try {
+        cachedData = jsonDecode(cachedData);
+      } catch (_) {
+        // 如果不是有效的 json 字符串，直接返回原值
+      }
+    }
+
+    // 如果是 Map，使用序列化器反序列化
+    if (cachedData is Map || cachedData is List) {
+      return responseSerializer.parseResponse<T>(cachedData, this);
+    }
+
+    // 其他情况直接返回
+    return cachedData as T?;
   }
 
   /// 网络请求（原有逻辑）
