@@ -188,6 +188,58 @@ my_app/
 - **模板系统**：支持自定义项目模板
 - **Git 依赖**：通过 git 直接引用，无需发布到 pub.dev
 
+## 网络缓存策略
+
+flux_core 提供了多种缓存策略，通过 `FLXApiCachePolicy` 配置：
+
+```dart
+FLXApiCachePolicy(
+  type: FLXApiCacheType.cacheThenNetwork,  // 缓存优先，异步更新
+  memoryDuration: Duration(minutes: 30),
+  diskDuration: Duration(hours: 1),
+)
+```
+
+### 策略类型
+
+| 策略 | 说明 |
+|------|------|
+| `noCache` | 不使用缓存，每次都发起网络请求 |
+| `cacheFirst` | 优先使用缓存，缓存未命中时发网络请求 |
+| `cacheThenNetwork` | 同时返回缓存和网络请求结果（缓存立即返回，网络请求异步更新缓存） |
+| `networkThenCache` | 优先使用网络请求，失败时使用缓存 |
+| `networkOnlyCache` | 仅网络请求，成功后更新缓存 |
+| `cacheOnly` | 仅使用缓存，不发起网络请求 |
+
+### 数据来源回调
+
+通过 `onDataSource` 回调可感知数据来源：
+
+```dart
+api.query<User>(
+  onDataSource: (fromCache, data) {
+    if (fromCache) {
+      print('来自缓存: $data');
+    } else {
+      print('来自网络: $data');
+    }
+  },
+);
+```
+
+**回调触发时机**：
+
+| 策略 | `fromCache=true` | `fromCache=false` |
+|------|-----------------|-------------------|
+| cacheFirst | 缓存命中 | 缓存未命中，网络返回 |
+| cacheThenNetwork | 缓存命中立即返回 | 网络异步完成 |
+| networkThenCache | 网络失败，降级到缓存 | 网络成功 |
+| networkOnlyCache | - | 网络返回 |
+| cacheOnly | 缓存命中 | - |
+| noCache | - | 网络返回 |
+
+> 注意：错误情况直接抛异常，不走回调。请求取消后不再触发回调。
+
 ## 代码生成器
 
 `flux_gen` 提供了代码生成工具：

@@ -21,11 +21,13 @@ class FLXGeneralApi<T> extends FLXCommonApi {
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
+    FLXDataCallback? onDataSource,
   }) {
     return query<T>(
       cancelToken: cancelToken,
       onSendProgress: onSendProgress,
       onReceiveProgress: onReceiveProgress,
+      onDataSource: onDataSource,
     );
   }
 }
