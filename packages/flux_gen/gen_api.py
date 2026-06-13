@@ -1083,6 +1083,37 @@ class ApiCodeGenerator:
 
         return field_type
 
+    def _field_value_expression(self, field_name: str, field_type: str) -> str:
+        """根据字段类型生成 Dart 值表达式
+
+        处理:
+        - List<结构体>: 'answers' -> answers?.map((e) => e.toJson()).toList()
+        - List<基础类型>: 'ids' -> ids (不转换)
+        - 结构体: 'user' -> user?.toJson()
+        - 基础类型: 'name' -> name (不转换)
+        """
+        base_types = {'String', 'int', 'double', 'bool', 'dynamic', 'Object'}
+
+        # 处理 List<T> 类型
+        if field_type.startswith('List<') and field_type.endswith('>'):
+            inner_type = field_type[5:-1]
+            # 去掉指针标记
+            if inner_type.startswith('*'):
+                inner_type = inner_type[1:]
+            if inner_type not in base_types and not inner_type.startswith('Map<'):
+                return f"{field_name}.map((e) => e.toJson()).toList()"
+            return field_name
+
+        # 处理指针类型
+        if field_type.startswith('*'):
+            field_type = field_type[1:]
+
+        # 处理普通自定义类型（结构体）
+        if field_type not in base_types and not field_type.startswith('Map<'):
+            return f"{field_name}.toJson()"
+
+        return field_name
+
     def _generate_endpoint_method(self, endpoint: ApiEndpoint, api_file: ApiFile, generated_models: Set[str]) -> str:
         """生成单个端点方法"""
         lines = []
@@ -1184,7 +1215,8 @@ class ApiCodeGenerator:
             for field in body_fields:
                 # 使用 API 定义中的 json_name 作为 key
                 json_key = field.json_name or field.name
-                lines.append(f"  if ({field.name} != null) '{json_key}': {field.name},")
+                value_expr = self._field_value_expression(field.name, field.type)
+                lines.append(f"  if ({field.name} != null) '{json_key}': {value_expr},")
             lines.append("};")
 
         # 生成 options
