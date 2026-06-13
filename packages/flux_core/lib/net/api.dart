@@ -133,6 +133,15 @@ abstract class FLXCommonApi extends FLXApi {
             onReceiveProgress: onReceiveProgress,
             onDataSource: onDataSource,
           );
+        case FLXApiCacheType.optionalCacheThenNetwork:
+          return _optionalCacheThenNetworkStrategy<T>(
+            cacheKey,
+            cachePolicy,
+            cancelToken: cancelToken,
+            onSendProgress: onSendProgress,
+            onReceiveProgress: onReceiveProgress,
+            onDataSource: onDataSource,
+          );
         case FLXApiCacheType.networkOnlyCache:
           return _networkOnlyCacheStrategy<T>(
             cacheKey,
@@ -313,6 +322,34 @@ abstract class FLXCommonApi extends FLXApi {
     }
     logT("Cache MISS (cacheOnly): $cacheKey");
     return null;
+  }
+
+  /// optionalCacheThenNetworkStrategy - 可选缓存策略
+  Future<T?> _optionalCacheThenNetworkStrategy<T>(
+    String cacheKey,
+    FLXApiCachePolicy cachePolicy, {
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+    FLXDataCallback<T>? onDataSource,
+  }) async {
+    if (onDataSource != null) {
+      return _cacheThenNetworkStrategy(
+        cacheKey,
+        cachePolicy,
+        cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+        onDataSource: onDataSource,
+      );
+    } else {
+      return _queryNetwork<T>(
+        cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+        onDataSource: onDataSource,
+      );
+    }
   }
 
   /// 反序列化缓存数据

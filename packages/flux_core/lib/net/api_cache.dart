@@ -26,13 +26,7 @@ class FLXApiCacheEntry<T> {
   /// 缓存来源（内存/磁盘）
   final FLXApiCacheLevel? source;
 
-  FLXApiCacheEntry({
-    required this.data,
-    required this.cacheTime,
-    this.expireTime,
-    this.headers,
-    this.source,
-  });
+  FLXApiCacheEntry({required this.data, required this.cacheTime, this.expireTime, this.headers, this.source});
 
   /// 检查是否过期
   bool get isExpired {
@@ -97,7 +91,7 @@ class FLXApiCachePolicy {
   final String Function(FLXApiOptions)? keyGenerator;
 
   const FLXApiCachePolicy({
-    this.type = FLXApiCacheType.cacheThenNetwork,
+    this.type = FLXApiCacheType.optionalCacheThenNetwork,
     this.memoryDuration = const Duration(minutes: 30),
     this.diskDuration = const Duration(hours: 1),
     this.maxMemoryCount = 100,
@@ -106,16 +100,31 @@ class FLXApiCachePolicy {
     this.keyGenerator,
   });
 
+  FLXApiCachePolicy copyWith({
+    FLXApiCacheType? type,
+    Duration? memoryDuration,
+    Duration? diskDuration,
+    int? maxMemoryCount,
+    int? maxMemorySize,
+    FLXApiCacheLevel? level,
+    String Function(FLXApiOptions)? keyGenerator,
+  }) => FLXApiCachePolicy(
+    type: type ?? this.type,
+    memoryDuration: memoryDuration ?? this.memoryDuration,
+    diskDuration: diskDuration ?? this.diskDuration,
+    maxMemoryCount: maxMemoryCount ?? this.maxMemoryCount,
+    maxMemorySize: maxMemorySize ?? this.maxMemorySize,
+    level: level ?? this.level,
+    keyGenerator: keyGenerator ?? this.keyGenerator,
+  );
+
   /// 默认配置：两级缓存（内存30分钟 + 磁盘1小时）
   factory FLXApiCachePolicy.defaultCache() {
     return const FLXApiCachePolicy();
   }
 
   /// 仅内存缓存（无磁盘持久化）
-  factory FLXApiCachePolicy.memoryOnly({
-    Duration duration = const Duration(minutes: 30),
-    int maxCount = 100,
-  }) {
+  factory FLXApiCachePolicy.memoryOnly({Duration duration = const Duration(minutes: 30), int maxCount = 100}) {
     return FLXApiCachePolicy(
       type: FLXApiCacheType.cacheFirst,
       memoryDuration: duration,
@@ -125,31 +134,28 @@ class FLXApiCachePolicy {
   }
 
   /// 是否启用内存缓存
-  bool get hasMemoryCache =>
-      level == FLXApiCacheLevel.memoryOnly || level == FLXApiCacheLevel.memoryAndDisk;
+  bool get hasMemoryCache => level == FLXApiCacheLevel.memoryOnly || level == FLXApiCacheLevel.memoryAndDisk;
 
   /// 是否启用磁盘缓存
-  bool get hasDiskCache =>
-      level == FLXApiCacheLevel.diskOnly || level == FLXApiCacheLevel.memoryAndDisk;
+  bool get hasDiskCache => level == FLXApiCacheLevel.diskOnly || level == FLXApiCacheLevel.memoryAndDisk;
 
   /// 计算内存缓存过期时间
-  DateTime? get memoryExpireTime =>
-      hasMemoryCache ? DateTime.now().add(memoryDuration) : null;
+  DateTime? get memoryExpireTime => hasMemoryCache ? DateTime.now().add(memoryDuration) : null;
 
   /// 计算磁盘缓存过期时间
-  DateTime? get diskExpireTime =>
-      hasDiskCache ? DateTime.now().add(diskDuration) : null;
+  DateTime? get diskExpireTime => hasDiskCache ? DateTime.now().add(diskDuration) : null;
 }
 
 /// 缓存管理器（单例）
 class FLXApiCache {
   static final FLXApiCache _instance = FLXApiCache._internal();
+
   factory FLXApiCache() => _instance;
+
   FLXApiCache._internal();
 
   // 内存缓存：LRU LinkedHashMap
-  final LinkedHashMap<String, FLXApiCacheEntry<dynamic>> _memoryCache =
-      LinkedHashMap();
+  final LinkedHashMap<String, FLXApiCacheEntry<dynamic>> _memoryCache = LinkedHashMap();
 
   // 内存缓存统计
   int _memoryCacheCount = 0;
@@ -201,11 +207,7 @@ class FLXApiCache {
             _diskHitCount++;
             // 回填内存缓存（存储 jsonDecode 后的数据）
             if (policy?.hasMemoryCache ?? true) {
-              await _setMemoryCache(
-                key,
-                entry.data,
-                expireTime: entry.expireTime,
-              );
+              await _setMemoryCache(key, entry.data, expireTime: entry.expireTime);
             }
             return entry.data; // 返回 jsonDecode 后的原始数据
           } else {
@@ -225,29 +227,20 @@ class FLXApiCache {
   /// 写入缓存
   /// data 是已经序列化后的数据（json 字符串或 Map）
   /// 写入磁盘时会进一步 jsonEncode
-  Future<void> set(
-    String key,
-    dynamic data, {
-    FLXApiCachePolicy? policy,
-    Map<String, dynamic>? headers,
-  }) async {
+  Future<void> set(String key, dynamic data, {FLXApiCachePolicy? policy, Map<String, dynamic>? headers}) async {
     final now = DateTime.now();
 
     // 1. 写入内存缓存（存储序列化后的数据）
     if (policy?.hasMemoryCache ?? true) {
-      await _setMemoryCache(
-        key,
-        data,
-        headers: headers,
-        expireTime: policy?.memoryExpireTime,
-      );
+      await _setMemoryCache(key, data, headers: headers, expireTime: policy?.memoryExpireTime);
     }
 
     // 2. 写入磁盘缓存
     if (policy?.hasDiskCache ?? true) {
       await _ensureInitialized();
       final entry = FLXApiCacheEntry<dynamic>(
-        data: data, // 存储序列化后的数据
+        data: data,
+        // 存储序列化后的数据
         cacheTime: now,
         expireTime: policy?.diskExpireTime,
         headers: headers,
@@ -260,12 +253,7 @@ class FLXApiCache {
   }
 
   /// 写入内存缓存
-  Future<void> _setMemoryCache(
-    String key,
-    dynamic data, {
-    Map<String, dynamic>? headers,
-    DateTime? expireTime,
-  }) async {
+  Future<void> _setMemoryCache(String key, dynamic data, {Map<String, dynamic>? headers, DateTime? expireTime}) async {
     // LRU 淘汰：如果达到容量上限，先删除最久未使用的
     while (_memoryCacheCount >= 100) {
       // 删除最旧的条目

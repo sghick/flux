@@ -26,6 +26,9 @@ enum FLXApiCacheType {
   /// 同时返回缓存和网络请求结果（缓存立即返回，网络请求异步更新缓存）
   cacheThenNetwork,
 
+  /// 可选缓存，如果有onDataSource参数，则执行cacheThenNetwork策略，否则执行noCache策略。
+  optionalCacheThenNetwork,
+
   /// 优先使用网络请求，失败时使用缓存
   networkThenCache,
 
