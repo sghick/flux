@@ -466,9 +466,9 @@ class ApiParser:
             # Go 字段名保持原样，Dart 属性名转驼峰
             dart_field_name = self._to_camel_case(field_name)
 
-            # 对于 path/form/header 参数，Dart 属性名使用原始名称
+            # 对于 path/form/header 参数，Dart 属性名转驼峰
             if tag_source in ('path', 'form', 'header'):
-                dart_field_name = field_name.lower()
+                dart_field_name = self._to_camel_case(field_name)
 
             fields.append(ApiField(
                 name=dart_field_name,
@@ -1165,11 +1165,15 @@ class ApiCodeGenerator:
                 if self.config.common_header and field.type == self.config.common_header:
                     continue
 
-                # 所有字段都使用可空类型，自定义类型添加 FLX 前缀
-                null_suffix = '?'
-                default_value = f" = {field.default}" if field.default else ''
                 prefixed_type = self._get_prefixed_type(field.type)
-                params.append(f"{prefixed_type}{null_suffix} {field.name}{default_value}")
+
+                if field.optional or field.default:
+                    # 可选或有默认值：类型加 ?，有默认值时附加默认值
+                    default_value = f" = {field.default}" if field.default else ''
+                    params.append(f"{prefixed_type}? {field.name}{default_value}")
+                else:
+                    # 必填参数：类型不加 ?，加 required
+                    params.append(f"required {prefixed_type} {field.name}")
 
         if not params:
             return ""
