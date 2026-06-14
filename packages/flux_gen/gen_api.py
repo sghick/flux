@@ -1209,6 +1209,7 @@ class ApiCodeGenerator:
                     body_fields.append(field)
 
         has_body_fields = len(body_fields) > 0
+        has_form_params = len(form_params) > 0
 
         if has_body_fields:
             lines.append("final data = <String, dynamic>{")
@@ -1219,6 +1220,13 @@ class ApiCodeGenerator:
                 lines.append(f"  if ({field.name} != null) '{json_key}': {value_expr},")
             lines.append("};")
 
+        if has_form_params:
+            lines.append("final params = <String, dynamic>{")
+            for field in form_params:
+                form_key = field.json_name or field.name
+                lines.append(f"  if ({field.name} != null) '{form_key}': {field.name},")
+            lines.append("};")
+
         # 生成 options
         if endpoint.response_type:
             response_type = self._get_prefixed_name(endpoint.response_type)
@@ -1227,6 +1235,8 @@ class ApiCodeGenerator:
             lines.append(f"  {api_constant},")
             if has_body_fields:
                 lines.append("  data: data,")
+            if has_form_params:
+                lines.append("  params: params,")
             lines.append(f"  typeParser: FLXTypeParser.single((json) => {response_type}.fromJson(json)),")
             lines.append(");")
             lines.append(f"return FLXGeneralApi<{response_type}>(options);")
