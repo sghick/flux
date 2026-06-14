@@ -29,6 +29,13 @@ class FLXApiOptions {
   /// 缓存策略配置
   final FLXApiCachePolicy? cachePolicy;
 
+  /// 自定义 Api 标识，用于请求去重
+  ///
+  /// 多个相同 apiId 的并发请求只会真正发起一次网络请求，
+  /// 其余请求等待第一个请求返回后共享结果。
+  /// 不传则自动根据 method + url + params + data 生成 MD5 标识。
+  final String? apiId;
+
   FLXApiOptions(
     this.method,
     this.path, {
@@ -47,6 +54,7 @@ class FLXApiOptions {
     this.responseSerializer,
     this.typeParser,
     this.cachePolicy,
+    this.apiId,
   }) : toastBlackCodes = {} {
     if (initialToastBlackCodes != null) {
       toastBlackCodes.addAll(initialToastBlackCodes!);

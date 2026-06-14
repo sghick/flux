@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
@@ -162,9 +161,6 @@ class FLXApiCache {
   int _memoryCacheSize = 0;
   int _memoryHitCount = 0;
   int _diskHitCount = 0;
-
-  // 请求去重
-  final Map<String, Completer<dynamic>> _pendingRequests = {};
 
   // SharedPreferences 实例
   SharedPreferences? _prefs;
@@ -371,27 +367,5 @@ class FLXApiCache {
     _memoryCacheCount = _memoryCache.length;
     // 简化：每个条目估算 1KB
     _memoryCacheSize = _memoryCacheCount * 1024;
-  }
-
-  /// 获取去重的请求
-  Future<T?> getOrCreate<T>(String key, Future<T?> Function() factory) async {
-    if (_pendingRequests.containsKey(key)) {
-      final completer = _pendingRequests[key]!;
-      return await completer.future as T?;
-    }
-
-    final completer = Completer<T?>();
-    _pendingRequests[key] = completer;
-
-    try {
-      final result = await factory();
-      completer.complete(result);
-      return result;
-    } catch (e) {
-      completer.completeError(e);
-      rethrow;
-    } finally {
-      _pendingRequests.remove(key);
-    }
   }
 }

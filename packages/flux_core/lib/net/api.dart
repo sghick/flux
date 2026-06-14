@@ -5,6 +5,7 @@ import 'package:flux_core/log/logger.dart';
 
 import 'api_cache.dart';
 import 'api_client.dart';
+import 'api_deduplicator.dart';
 import 'api_enums.dart';
 import 'api_options.dart';
 import 'api_request_serializer.dart';
@@ -63,6 +64,9 @@ abstract class FLXCommonApi extends FLXApi {
   /// 缓存管理器
   FLXApiCache get _cache => FLXApiCache();
 
+  /// 请求节流器
+  FLXApiDeduplicator get _deduplicator => FLXApiDeduplicator();
+
   @override
   Future<T?> query<T>({
     CancelToken? cancelToken,
@@ -70,28 +74,34 @@ abstract class FLXCommonApi extends FLXApi {
     ProgressCallback? onReceiveProgress,
     FLXDataCallback<T>? onDataSource,
   }) async {
-    final cachePolicy = options.cachePolicy;
+    // 生成 ApiId（用户自定义优先，否则自动生成）
+    final apiId = options.apiId ?? FLXApiDeduplicator.defaultApiIdGenerator(options);
 
-    // 如果没有配置缓存策略，直接发起网络请求
-    if (cachePolicy == null || cachePolicy.type == FLXApiCacheType.noCache) {
-      return _queryNetwork<T>(
+    // 统一经过节流器：同一时间相同 apiId 的请求只发一次
+    return _deduplicator.deduplicate<T?>(apiId, () async {
+      final cachePolicy = options.cachePolicy;
+
+      // 如果没有配置缓存策略，直接发起网络请求
+      if (cachePolicy == null || cachePolicy.type == FLXApiCacheType.noCache) {
+        return _queryNetwork<T>(
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+      }
+
+      // 使用缓存策略
+      final cacheKey = cachePolicy.keyGenerator?.call(options) ?? _cache.generateKey(options);
+      return _queryWithCache<T>(
+        cacheKey,
+        cachePolicy,
         cancelToken: cancelToken,
         onSendProgress: onSendProgress,
         onReceiveProgress: onReceiveProgress,
         onDataSource: onDataSource,
       );
-    }
-
-    // 使用缓存策略
-    final cacheKey = cachePolicy.keyGenerator?.call(options) ?? _cache.generateKey(options);
-    return _queryWithCache<T>(
-      cacheKey,
-      cachePolicy,
-      cancelToken: cancelToken,
-      onSendProgress: onSendProgress,
-      onReceiveProgress: onReceiveProgress,
-      onDataSource: onDataSource,
-    );
+    });
   }
 
   /// 带缓存的查询
@@ -103,65 +113,62 @@ abstract class FLXCommonApi extends FLXApi {
     ProgressCallback? onReceiveProgress,
     FLXDataCallback<T>? onDataSource,
   }) async {
-    // 使用请求去重
-    return _cache.getOrCreate<T>(cacheKey, () async {
-      switch (cachePolicy.type) {
-        case FLXApiCacheType.cacheFirst:
-          return _cacheFirstStrategy<T>(
-            cacheKey,
-            cachePolicy,
-            cancelToken: cancelToken,
-            onSendProgress: onSendProgress,
-            onReceiveProgress: onReceiveProgress,
-            onDataSource: onDataSource,
-          );
-        case FLXApiCacheType.cacheThenNetwork:
-          return _cacheThenNetworkStrategy<T>(
-            cacheKey,
-            cachePolicy,
-            cancelToken: cancelToken,
-            onSendProgress: onSendProgress,
-            onReceiveProgress: onReceiveProgress,
-            onDataSource: onDataSource,
-          );
-        case FLXApiCacheType.networkThenCache:
-          return _networkThenCacheStrategy<T>(
-            cacheKey,
-            cachePolicy,
-            cancelToken: cancelToken,
-            onSendProgress: onSendProgress,
-            onReceiveProgress: onReceiveProgress,
-            onDataSource: onDataSource,
-          );
-        case FLXApiCacheType.optionalCacheThenNetwork:
-          return _optionalCacheThenNetworkStrategy<T>(
-            cacheKey,
-            cachePolicy,
-            cancelToken: cancelToken,
-            onSendProgress: onSendProgress,
-            onReceiveProgress: onReceiveProgress,
-            onDataSource: onDataSource,
-          );
-        case FLXApiCacheType.networkOnlyCache:
-          return _networkOnlyCacheStrategy<T>(
-            cacheKey,
-            cachePolicy,
-            cancelToken: cancelToken,
-            onSendProgress: onSendProgress,
-            onReceiveProgress: onReceiveProgress,
-            onDataSource: onDataSource,
-          );
-        case FLXApiCacheType.cacheOnly:
-          return _cacheOnlyStrategy<T>(cacheKey, cachePolicy, onDataSource: onDataSource);
-        case FLXApiCacheType.noCache:
-          return _queryNetwork<T>(
-            cancelToken: cancelToken,
-            onSendProgress: onSendProgress,
-            onReceiveProgress: onReceiveProgress,
-            onDataSource: onDataSource,
-          );
-      }
-    });
+    switch (cachePolicy.type) {
+      case FLXApiCacheType.cacheFirst:
+        return _cacheFirstStrategy<T>(
+          cacheKey,
+          cachePolicy,
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+      case FLXApiCacheType.cacheThenNetwork:
+        return _cacheThenNetworkStrategy<T>(
+          cacheKey,
+          cachePolicy,
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+      case FLXApiCacheType.networkThenCache:
+        return _networkThenCacheStrategy<T>(
+          cacheKey,
+          cachePolicy,
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+      case FLXApiCacheType.optionalCacheThenNetwork:
+        return _optionalCacheThenNetworkStrategy<T>(
+          cacheKey,
+          cachePolicy,
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+      case FLXApiCacheType.networkOnlyCache:
+        return _networkOnlyCacheStrategy<T>(
+          cacheKey,
+          cachePolicy,
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+      case FLXApiCacheType.cacheOnly:
+        return _cacheOnlyStrategy<T>(cacheKey, cachePolicy, onDataSource: onDataSource);
+      case FLXApiCacheType.noCache:
+        return _queryNetwork<T>(
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          onReceiveProgress: onReceiveProgress,
+          onDataSource: onDataSource,
+        );
+    }
   }
 
   /// cacheFirst - 优先缓存

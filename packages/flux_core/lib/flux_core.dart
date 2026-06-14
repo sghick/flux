@@ -19,6 +19,7 @@ export 'model/json/json_annotation.dart';
 export 'net/api.dart';
 export 'net/api_cache.dart';
 export 'net/api_client.dart';
+export 'net/api_deduplicator.dart';
 export 'net/api_enums.dart';
 export 'net/api_error.dart';
 export 'net/api_options.dart';
