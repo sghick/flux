@@ -74,34 +74,28 @@ abstract class FLXCommonApi extends FLXApi {
     ProgressCallback? onReceiveProgress,
     FLXDataCallback<T>? onDataSource,
   }) async {
-    // 生成 ApiId（用户自定义优先，否则自动生成）
-    final apiId = options.apiId ?? FLXApiDeduplicator.defaultApiIdGenerator(options);
+    final cachePolicy = options.cachePolicy;
 
-    // 统一经过节流器：同一时间相同 apiId 的请求只发一次
-    return _deduplicator.deduplicate<T?>(apiId, () async {
-      final cachePolicy = options.cachePolicy;
-
-      // 如果没有配置缓存策略，直接发起网络请求
-      if (cachePolicy == null || cachePolicy.type == FLXApiCacheType.noCache) {
-        return _queryNetwork<T>(
-          cancelToken: cancelToken,
-          onSendProgress: onSendProgress,
-          onReceiveProgress: onReceiveProgress,
-          onDataSource: onDataSource,
-        );
-      }
-
-      // 使用缓存策略
-      final cacheKey = cachePolicy.keyGenerator?.call(options) ?? _cache.generateKey(options);
-      return _queryWithCache<T>(
-        cacheKey,
-        cachePolicy,
+    // 如果没有配置缓存策略，直接发起网络请求
+    if (cachePolicy == null || cachePolicy.type == FLXApiCacheType.noCache) {
+      return _queryNetwork<T>(
         cancelToken: cancelToken,
         onSendProgress: onSendProgress,
         onReceiveProgress: onReceiveProgress,
         onDataSource: onDataSource,
       );
-    });
+    }
+
+    // 使用缓存策略
+    final cacheKey = cachePolicy.keyGenerator?.call(options) ?? _cache.generateKey(options);
+    return _queryWithCache<T>(
+      cacheKey,
+      cachePolicy,
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+      onDataSource: onDataSource,
+    );
   }
 
   /// 带缓存的查询
@@ -380,8 +374,27 @@ abstract class FLXCommonApi extends FLXApi {
     return cachedData as T?;
   }
 
-  /// 网络请求（原有逻辑）
+  /// 网络请求（带请求去重节流）
   Future<T?> _queryNetwork<T>({
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+    FLXDataCallback<T>? onDataSource,
+  }) async {
+    // 生成 ApiId（用户自定义优先，否则自动生成）
+    final apiId = options.apiId ?? FLXApiDeduplicator.defaultApiIdGenerator(options);
+
+    // 节流：同一时间相同 apiId 的网络请求只发一次
+    return _deduplicator.deduplicate<T?>(apiId, () => _doRequest<T>(
+      cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
+      onReceiveProgress: onReceiveProgress,
+      onDataSource: onDataSource,
+    ));
+  }
+
+  /// 实际发起网络请求
+  Future<T?> _doRequest<T>({
     CancelToken? cancelToken,
     ProgressCallback? onSendProgress,
     ProgressCallback? onReceiveProgress,
