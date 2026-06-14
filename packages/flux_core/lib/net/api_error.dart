@@ -7,7 +7,7 @@ class FLXNetError extends FLXError {
 
   FLXNetError(super.domain, super.code, super.msg, this.response);
 
-  static const String netExceptionDomain = "ifk.network.error.domain";
+  static const String netExceptionDomain = "flux.network.error.domain";
 
   static const int netErrorCode = 1000;
   static const int parseErrorCode = 1001;

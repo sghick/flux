@@ -90,6 +90,9 @@ abstract class FLXApiResponseSerializer<T> {
           return (e is FLXNetError) ? e : FLXNetError.netError.eWith(msg: e.toString());
         }
       }
+      if (e is DioException) {
+        return FLXNetError.defaultError(msg: e.toString(), response: e.response);
+      }
       return FLXNetError.defaultError(msg: e.toString());
     }
   }
