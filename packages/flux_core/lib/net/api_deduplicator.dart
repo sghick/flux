@@ -55,7 +55,7 @@ class FLXApiDeduplicator {
     } catch (e, s) {
       // 失败：通知所有等待者异常
       state.completeAllError(e, s);
-      rethrow;
+      return Future.error(e, s);
     } finally {
       // 请求完成后立即清理
       _pendingRequests.remove(apiId);
