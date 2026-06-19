@@ -31,7 +31,7 @@ def load_package_name():
         match = re.search(r'^name:\s*(.+)$', content, re.MULTILINE)
         if match:
             return match.group(1).strip()
-    return "fastkeyboard"
+    return "myapp"
 
 def load_gen_config():
     """加载生成器配置文件"""
