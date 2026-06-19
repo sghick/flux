@@ -7,12 +7,12 @@ import '../log/logger.dart';
 final FLXKeychainService keychainService = FLXKeychainService();
 
 class FLXKeychainService {
-  static const String keychainUuid = 'DE4AppInfo.keychain.UUID';
+  String keychainUuid = '';
 
   late final String uuid;
 
-  Future<String> init() {
-    return _init().then((value) {
+  Future<String> init(String keychainUuid) {
+    return _init(keychainUuid).then((value) {
       uuid = value;
       logD('$runtimeType has been initialized');
       logD('keychain uuid: $value');
@@ -20,7 +20,7 @@ class FLXKeychainService {
     });
   }
 
-  Future<String> _init() {
+  Future<String> _init(String keychainUuid) {
     return FlutterKeychainPlus.get(key: keychainUuid).then((value) {
       if (value == null) {
         final uuid = Uuid().v4().toString();
