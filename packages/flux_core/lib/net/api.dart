@@ -385,12 +385,22 @@ abstract class FLXCommonApi extends FLXApi {
     final apiId = options.apiId ?? FLXApiDeduplicator.defaultApiIdGenerator(options);
 
     // 节流：同一时间相同 apiId 的网络请求只发一次
-    return _deduplicator.deduplicate<T?>(apiId, () => _doRequest<T>(
-      cancelToken: cancelToken,
+    // 回调双路径传递：
+    // 1. factory 闭包内 → 第一个 caller 在 _doRequest/Dio 中直接触发
+    // 2. deduplicate 参数 → 后续合并进来的 caller 在 completeAll/forward 时触发
+    return _deduplicator.deduplicate<T?>(
+      apiId,
+      () => _doRequest<T>(
+        cancelToken: cancelToken,
+        // 用 deduplicator 包装进度回调，让后续排队的 caller 也能实时收到进度
+        onSendProgress: _deduplicator.wrapSendProgress(apiId, onSendProgress),
+        onReceiveProgress: _deduplicator.wrapReceiveProgress(apiId, onReceiveProgress),
+        onDataSource: onDataSource,
+      ),
+      onResult: onDataSource != null ? (result) => onDataSource(false, result) : null,
       onSendProgress: onSendProgress,
       onReceiveProgress: onReceiveProgress,
-      onDataSource: onDataSource,
-    ));
+    );
   }
 
   /// 实际发起网络请求
@@ -421,7 +431,9 @@ abstract class FLXCommonApi extends FLXApi {
       return result;
     } catch (e, s) {
       _logError(methodName, e, s);
-      return responseSerializer.apiHandleError<T>(e, s, this);
+      final result = await responseSerializer.apiHandleError<T>(e, s, this);
+      onDataSource?.call(false, result);
+      return result;
     }
   }
 

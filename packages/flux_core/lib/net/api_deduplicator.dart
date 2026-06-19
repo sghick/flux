@@ -21,6 +21,10 @@ class FLXApiDeduplicator {
 
   FLXApiDeduplicator._internal();
 
+  /// 同一 apiId 允许多少个 caller 排队等待，超出则直接拒绝。
+  /// 防止极端情况下（如页面快速重建）积压过多无意义的等待者。
+  static int maxCallersPerApi = 5;
+
   /// 当前进行中的请求
   /// key: apiId, value: 该请求对应的 pending 状态
   final Map<String, _PendingState> _pendingRequests = {};
@@ -29,17 +33,37 @@ class FLXApiDeduplicator {
   ///
   /// [apiId] 请求唯一标识，不允许为空
   /// [factory] 真正发起请求的工厂函数
+  /// [onResult] 请求成功后，通知后续合并进来的 caller（结果回调）
+  /// [onSendProgress] 请求过程中，转发发送进度给后续 caller
+  /// [onReceiveProgress] 请求过程中，转发接收进度给后续 caller
   ///
   /// 如果当前没有相同 apiId 的请求在进行中，执行 factory 并返回结果；
   /// 如果已有相同 apiId 的请求在进行中，挂起当前请求，等待第一个请求的结果。
-  Future<T> deduplicate<T>(String apiId, Future<T> Function() factory) async {
+  Future<T> deduplicate<T>(
+    String apiId,
+    Future<T> Function() factory, {
+    void Function(T result)? onResult,
+    void Function(int count, int total)? onSendProgress,
+    void Function(int count, int total)? onReceiveProgress,
+  }) async {
     assert(apiId.isNotEmpty, 'apiId must not be empty');
 
-    // 已有进行中的请求，注册一个 Completer 并等待
+    // 已有进行中的请求，注册到队列等待
     if (_pendingRequests.containsKey(apiId)) {
-      final state = _pendingRequests[apiId]!;
+      final state = _pendingRequests[apiId]! as _PendingState<T>;
       final completer = Completer<T>();
-      state.addCompleter(completer);
+      final caller = _CallerHandlers<T>(
+        completer: completer,
+        onResult: onResult,
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+      );
+      if (!state.tryEnqueue(caller)) {
+        throw StateError(
+          'Too many concurrent callers waiting for apiId: $apiId '
+          '(max: $maxCallersPerApi). Consider using a different apiId.',
+        );
+      }
       return completer.future;
     }
 
@@ -49,7 +73,7 @@ class FLXApiDeduplicator {
 
     try {
       final result = await factory();
-      // 成功：通知所有等待者
+      // 成功：通知所有等待者（complete future + 回调 onResult）
       state.completeAll(result);
       return result;
     } catch (e, s) {
@@ -60,6 +84,31 @@ class FLXApiDeduplicator {
       // 请求完成后立即清理
       _pendingRequests.remove(apiId);
     }
+  }
+
+  /// 包装发送进度回调：同时触发原始回调，并实时转发给所有排队中的 caller。
+  ///
+  /// 使用场景：第一个 caller 在其 factory 中将 Dio 的进度回调通过此方法包装，
+  /// 这样后续排队的 caller 也能收到实时进度。
+  void Function(int count, int total)? wrapSendProgress(
+    String apiId,
+    void Function(int count, int total)? original,
+  ) {
+    return (count, total) {
+      original?.call(count, total);
+      _pendingRequests[apiId]?.forwardSendProgress(count, total);
+    };
+  }
+
+  /// 包装接收进度回调：同时触发原始回调，并实时转发给所有排队中的 caller。
+  void Function(int count, int total)? wrapReceiveProgress(
+    String apiId,
+    void Function(int count, int total)? original,
+  ) {
+    return (count, total) {
+      original?.call(count, total);
+      _pendingRequests[apiId]?.forwardReceiveProgress(count, total);
+    };
   }
 
   /// 是否有进行中的请求
@@ -84,23 +133,62 @@ class FLXApiDeduplicator {
   }
 }
 
-/// 请求进行中的状态，管理一组等待者
-class _PendingState<T> {
-  final List<Completer<T>> _completers = [];
+/// 单个排队 caller 的所有回调处理器，统一封装避免多份列表各自管理。
+class _CallerHandlers<T> {
+  final Completer<T> completer;
+  final void Function(T result)? onResult;
+  final void Function(int count, int total)? onSendProgress;
+  final void Function(int count, int total)? onReceiveProgress;
 
-  void addCompleter(Completer<T> completer) {
-    _completers.add(completer);
+  _CallerHandlers({
+    required this.completer,
+    this.onResult,
+    this.onSendProgress,
+    this.onReceiveProgress,
+  });
+}
+
+/// 请求进行中的状态，管理一组排队等待的 caller。
+///
+/// 注意：第一个 caller 不在队列中——它的回调由 factory 内部直接触发；
+/// 此处只管理后续合并进来的 caller。
+class _PendingState<T> {
+  final List<_CallerHandlers<T>> _callers = [];
+
+  /// 尝试将 caller 加入排队队列。
+  /// 返回 true 表示成功；返回 false 表示队列已满（达到 [FLXApiDeduplicator.maxCallersPerApi]）。
+  bool tryEnqueue(_CallerHandlers<T> caller) {
+    if (_callers.length >= FLXApiDeduplicator.maxCallersPerApi) return false;
+    _callers.add(caller);
+    return true;
   }
 
+  /// 请求成功：完成所有等待者的 Future 并触发各自的 onResult
   void completeAll(T result) {
-    for (final c in _completers) {
-      c.complete(result);
+    for (final caller in _callers) {
+      caller.completer.complete(result);
+      caller.onResult?.call(result);
     }
   }
 
+  /// 请求失败：通知所有等待者异常
   void completeAllError(Object error, StackTrace stackTrace) {
-    for (final c in _completers) {
-      c.completeError(error, stackTrace);
+    for (final caller in _callers) {
+      caller.completer.completeError(error, stackTrace);
+    }
+  }
+
+  /// 实时转发发送进度给所有排队 caller
+  void forwardSendProgress(int count, int total) {
+    for (final caller in _callers) {
+      caller.onSendProgress?.call(count, total);
+    }
+  }
+
+  /// 实时转发接收进度给所有排队 caller
+  void forwardReceiveProgress(int count, int total) {
+    for (final caller in _callers) {
+      caller.onReceiveProgress?.call(count, total);
     }
   }
 }
