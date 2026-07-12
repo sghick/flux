@@ -1,9 +1,17 @@
 import 'dart:io';
 
-/// 获取 flux_gen 目录路径（已打包在 CLI 的 lib/src/flux_gen/ 中）
+/// 向上查找 pubspec.yaml，定位 CLI 包根目录，返回打包的 flux_gen 路径
 String findFluxGenDir() {
-  final scriptPath = Platform.script.toFilePath();
-  // bin/ 和 lib/ 是同级目录：bin/flux.dart -> ../lib/src/flux_gen/
-  final pkgRoot = File(scriptPath).parent.parent.path;
-  return '$pkgRoot/lib/src/flux_gen';
+  var dir = Directory(File(Platform.script.toFilePath()).parent.path);
+
+  for (int i = 0; i < 10; i++) {
+    if (File('${dir.path}/pubspec.yaml').existsSync()) {
+      final pkgRoot = dir.path;
+      return '$pkgRoot/lib/src/flux_gen';
+    }
+    dir = dir.parent;
+  }
+
+  throw StateError('Cannot locate flux CLI package root (pubspec.yaml not found). '
+      'Please reinstall: dart pub global activate --source git https://github.com/sghick/flux.git');
 }
