@@ -22,6 +22,7 @@ ROUTE_PATH_FILE = PROJECT_ROOT / "lib" / "routes" / "route_config.path.dart"
 ROUTE_PAGES_FILE = PROJECT_ROOT / "lib" / "routes" / "route_config.pages.dart"
 ROUTE_NAVIGATOR_FILE = PROJECT_ROOT / "lib" / "routes" / "route_navigator.dart"
 MAIN_TAB_LOGIC_FILE = PROJECT_ROOT / "lib" / "pages" / "main_tab" / "main_tab_logic.dart"
+PAGE_PARAMS_FILE = PROJECT_ROOT / "lib" / "routes" / "page_params.dart"
 
 def load_package_name():
     """从 pubspec.yaml 获取包名"""
@@ -89,13 +90,171 @@ def load_config():
 
 
 def parse_pages(pages_str_list):
-    """解析页面配置"""
+    """解析页面配置，支持 @arguments(...) 后缀"""
     pages = []
     for item in pages_str_list:
-        parts = item.strip().split()
-        if len(parts) == 2:
-            pages.append({"name": parts[0], "path": parts[1]})
+        item = item.strip()
+        # 分离 @arguments 部分
+        arguments_str = None
+        if "@arguments" in item:
+            idx = item.index("@arguments")
+            arguments_str = item[idx + len("@arguments"):].strip()
+            # 去掉外层括号
+            if arguments_str.startswith("(") and arguments_str.endswith(")"):
+                arguments_str = arguments_str[1:-1].strip()
+            item = item[:idx].strip()
+
+        parts = item.split()
+        if len(parts) >= 2:
+            page = {"name": parts[0], "path": parts[1]}
+            if arguments_str:
+                page["arguments"] = arguments_str
+            pages.append(page)
     return pages
+
+
+def parse_arguments_list(arguments_str):
+    """解析参数字符串，如 'String url, {String title = ''}'
+    返回 list[dict]，每个 dict 包含 type, name, default, isNamed, isRequired, isOptional"""
+    if not arguments_str:
+        return []
+
+    # 按顶层逗号分割（处理嵌套的 {} [] <>）
+    parts = []
+    depth = 0
+    current = ""
+    for ch in arguments_str:
+        if ch in "{[(<":
+            depth += 1
+        elif ch in "}])>":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(current.strip())
+            current = ""
+            continue
+        current += ch
+    if current.strip():
+        parts.append(current.strip())
+
+    params = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        if part.startswith("{") or part.startswith("["):
+            # 递归处理嵌套的参数组 {Type name = default, ...} 或 [Type name = default, ...]
+            inner = part[1:-1].strip()
+            nested = parse_arguments_list(inner)
+            for p in nested:
+                p["isNamed"] = part.startswith("{")
+                # 如果参数本身标记了 required，保留它
+                if not p.get("hasRequired", False):
+                    p["isRequired"] = False
+                p["isOptional"] = True
+            params.extend(nested)
+            continue
+
+        # 解析单参数: [required] Type name = default
+        # 用深度追踪找 type 和 name 的分界（处理 Map<String, String>? 这种内部有空格的情况）
+        has_required = False
+        working_part = part
+        if part.startswith("required "):
+            has_required = True
+            working_part = part[len("required "):]
+
+        depth_t = 0
+        type_end = -1
+        for i, ch in enumerate(working_part):
+            if ch == '<':
+                depth_t += 1
+            elif ch == '>':
+                depth_t -= 1
+            elif ch.isspace() and depth_t == 0:
+                type_end = i
+                break
+        if type_end > 0:
+            type_str = working_part[:type_end].strip()
+            rest = working_part[type_end:].strip()
+            # 解析 name 和 default: name = default
+            eq_idx = rest.find('=')
+            if eq_idx >= 0:
+                name_str = rest[:eq_idx].strip()
+                default_str = rest[eq_idx + 1:].strip()
+            else:
+                name_str = rest
+                default_str = None
+            params.append({
+                "type": type_str,
+                "name": name_str,
+                "default": default_str,
+                "isNamed": False,
+                "isRequired": True,
+                "isOptional": False,
+                "hasRequired": has_required,
+            })
+
+    return params
+
+
+def build_navigator_sig_from_args(arguments_str):
+    """根据参数字符串构建导航方法签名部分，如 '(String url, {String title = '\\''})'"""
+    params = parse_arguments_list(arguments_str)
+    if not params:
+        return "()"
+
+    required = [p for p in params if p["isRequired"] and not p["isNamed"]]
+    named = [p for p in params if p["isNamed"]]
+    optional_pos = [p for p in params if not p["isRequired"] and not p["isNamed"]]
+
+    sig_parts = []
+    for p in required:
+        sig_parts.append(f'{p["type"]} {p["name"]}')
+
+    if named:
+        named_parts = []
+        for p in named:
+            prefix = "required " if p.get("hasRequired", False) else ""
+            if p["default"] is not None:
+                named_parts.append(f'{prefix}{p["type"]} {p["name"]} = {p["default"]}')
+            else:
+                named_parts.append(f'{prefix}{p["type"]} {p["name"]}')
+        sig_parts.append("{" + ", ".join(named_parts) + "}")
+
+    if optional_pos:
+        pos_parts = []
+        for p in optional_pos:
+            if p["default"] is not None:
+                pos_parts.append(f'{p["type"]} {p["name"]} = {p["default"]}')
+            else:
+                pos_parts.append(f'{p["type"]} {p["name"]}')
+        sig_parts.append("[" + ", ".join(pos_parts) + "]")
+
+    return "(" + ", ".join(sig_parts) + ")"
+
+
+def build_navigator_arguments_map(arguments_str, prefix):
+    """根据参数字符串构建 arguments map，如 '{FLXParams.url: url, FLXParams.title: title}'"""
+    params = parse_arguments_list(arguments_str)
+    if not params:
+        return ""
+
+    entries = []
+    for p in params:
+        entries.append(f'{prefix}Params.{p["name"]}: {p["name"]}')
+
+    return "{" + ", ".join(entries) + "}"
+
+
+def collect_all_argument_names(pages_list):
+    """收集所有页面的参数名，用于更新 FLXParams"""
+    all_names = set()
+    for page in pages_list:
+        if "arguments" in page:
+            params = parse_arguments_list(page["arguments"])
+            for p in params:
+                all_names.add(p["name"])
+    return sorted(all_names)
 
 
 def to_camel_case(name):
@@ -536,7 +695,13 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
         return 0, 0
 
     content = ROUTE_NAVIGATOR_FILE.read_text(encoding="utf-8")
-    original_content = content
+
+    # 忽略注释行（模板示例方法会被注释掉）
+    non_comment_lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
+    non_comment_content = '\n'.join(non_comment_lines)
+
+    # 构建 name → page 映射，方便查 arguments
+    pages_map = {p["name"]: p for p in pages}
 
     # 按分组收集新方法
     new_entries = []
@@ -545,37 +710,44 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
         name = page["name"]
         const_name = to_const_name(name)
         method_name = "go" + to_camel_case(name) + "Page"
+        arguments_str = page.get("arguments", None)
 
-        # 检查是否已存在
-        if f"{method_name}<" in content:
+        # 检查是否已存在（忽略注释行）
+        if f"{method_name}<" in non_comment_content:
             if verbose:
                 skip_entries.append((method_name, const_name))
             continue
 
-        new_entries.append((method_name, const_name, name))
+        new_entries.append((method_name, const_name, name, arguments_str))
 
-    # 添加 main_tab 方法
+    # 添加 main_tab 方法（main_tab 不带 arguments）
     if main_tab:
-        if "goMainTabPage<" in content:
+        if "goMainTabPage<" in non_comment_content:
             if verbose:
                 skip_entries.append(("goMainTabPage", "pathMainTab"))
         else:
-            new_entries.insert(0, ("goMainTabPage", "pathMainTab", "main_tab"))
+            new_entries.insert(0, ("goMainTabPage", "pathMainTab", "main_tab", None))
 
     # 输出详情
     if verbose:
         for method_name, const_name in skip_entries:
             print(f"\033[33m[既存]\033[0m {method_name}()")
-        for method_name, const_name, name in new_entries:
-            print(f"\033[32m[新增]\033[0m {method_name}()")
+        for method_name, const_name, name, args_str in new_entries:
+            sig = build_navigator_sig_from_args(args_str) if args_str else "()"
+            print(f"\033[32m[新增]\033[0m {method_name}{sig}")
 
     if not new_entries:
         return 0, len(skip_entries)
 
     # 生成新方法代码（不再分组，直接按顺序添加）
     new_methods = []
-    for method_name, const_name, name in new_entries:
-        new_methods.append(f'  Future<T?> {method_name}<T>() => _getToNamed<T>(RoutePath.{const_name});')
+    for method_name, const_name, name, arguments_str in new_entries:
+        if arguments_str:
+            sig = build_navigator_sig_from_args(arguments_str)
+            args_map = build_navigator_arguments_map(arguments_str, CLASS_PREFIX)
+            new_methods.append(f'  Future<T?> {method_name}<T>{sig} =>\n      _getToNamed<T>(RoutePath.{const_name}, arguments: {args_map});')
+        else:
+            new_methods.append(f'  Future<T?> {method_name}<T>() => _getToNamed<T>(RoutePath.{const_name});')
 
     methods_text = "\n".join(new_methods)
     # 在类末尾闭合前插入
@@ -629,6 +801,46 @@ def update_main_tab_logic(tab_order):
         print(f"已更新 {MAIN_TAB_LOGIC_FILE.name}")
     else:
         print(f"main_tab_logic.dart 无需更新")
+
+
+def update_page_params(pages):
+    """更新 page_params.dart - 自动维护 FLXParams 中的参数常量"""
+    if not PAGE_PARAMS_FILE.exists():
+        return
+
+    # 收集所有页面参数名
+    param_names = collect_all_argument_names(pages)
+    if not param_names:
+        return
+
+    content = PAGE_PARAMS_FILE.read_text(encoding="utf-8")
+    original_content = content
+    new_consts = []
+
+    for name in param_names:
+        const_line = f'  static const {name} = \'{name}\';'
+        if const_line not in content:
+            new_consts.append(const_line)
+
+    if not new_consts:
+        return
+
+    # 在 class {prefix}Params 的闭 } 前插入新常量
+    class_pattern = f"class {CLASS_PREFIX}Params"
+    if class_pattern in content:
+        # 找到 class 体的最后一个 }
+        # 使用非贪婪匹配到 class 体的末尾
+        content = re.sub(
+            rf'({class_pattern}.*?)(\n\}})',
+            rf'\1\n' + "\n".join(new_consts) + r'\2',
+            content,
+            flags=re.DOTALL
+        )
+
+    if content != original_content:
+        PAGE_PARAMS_FILE.write_text(content, encoding="utf-8")
+        new_names = [pn for pn in param_names if f'static const {pn}' not in original_content]
+        print(f"已更新 {PAGE_PARAMS_FILE.name}，新增参数: {', '.join(new_names)}")
 
 
 def apply_package_placeholder(content):
@@ -695,7 +907,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("route_navigator.dart")
-    
+
     # route_navigator.util.dart
     if not (routes_dir / "route_navigator.util.dart").exists():
         template_file = TEMPLATES_DIR / "route_navigator.util.dart.tmpl"
@@ -708,7 +920,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("route_navigator.util.dart")
-    
+
     # route_navigator.native.dart
     if not (routes_dir / "route_navigator.native.dart").exists():
         template_file = TEMPLATES_DIR / "route_navigator.native.dart.tmpl"
@@ -721,7 +933,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("route_navigator.native.dart")
-    
+
     # page_params.dart
     if not (routes_dir / "page_params.dart").exists():
         template_file = TEMPLATES_DIR / "page_params.dart.tmpl"
@@ -734,7 +946,7 @@ def cmd_init():
                 encoding="utf-8"
             )
         created.append("page_params.dart")
-    
+
     # main_tab_logic.dart
     if not MAIN_TAB_LOGIC_FILE.exists():
         template_file = TEMPLATES_DIR / "main_tab_logic.dart.tmpl"
@@ -747,7 +959,7 @@ def cmd_init():
         MAIN_TAB_LOGIC_FILE.parent.mkdir(parents=True, exist_ok=True)
         MAIN_TAB_LOGIC_FILE.write_text(content, encoding="utf-8")
         created.append(MAIN_TAB_LOGIC_FILE.name)
-    
+
     if created:
         print("已创建文件：")
         for f in created:
@@ -758,25 +970,41 @@ def cmd_init():
 
 def cmd_routes():
     """routes 命令 - 更新路由配置"""
+    # 确保路由文件存在，不存在则先初始化
+    routes_dir = PROJECT_ROOT / "lib" / "routes"
+    required_files = [
+        routes_dir / "route_config.dart",
+        routes_dir / "route_config.path.dart",
+        routes_dir / "route_config.pages.dart",
+        routes_dir / "route_navigator.dart",
+    ]
+    missing = [f for f in required_files if not f.exists()]
+    if missing:
+        print("检测到路由文件缺失，先执行初始化...")
+        cmd_init()
+
     config = load_config()
     pages = parse_pages(config.get("pages", []))
     tab_order = config.get("tabOrder", [])
     main_tab = config.get("main_tab", None)
-    
+
     print("路由配置更新：")
     print("=" * 50)
-    
+
     # 统计并显示 path 更新
     new_path, skip_path = update_route_config_path(pages, main_tab, verbose=True)
-    
+
     # 统计并显示 pages 更新
     new_pages, skip_pages = update_route_config_pages(pages, main_tab, verbose=True)
-    
+
     # 统计并显示 navigator 更新
     new_nav, skip_nav = update_route_navigator(pages, main_tab, verbose=True)
-    
+
     # main_tab_logic
     update_main_tab_logic(tab_order)
+
+    # page_params 参数常量
+    update_page_params(pages)
     
     print("=" * 50)
     print(f"路径常量: \033[32m新增 {new_path}\033[0m | \033[33m既存 {skip_path}\033[0m")

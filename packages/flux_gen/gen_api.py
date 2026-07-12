@@ -100,22 +100,25 @@ class GeneratorConfig:
     # 默认配置
     DEFAULT_CONFIG = {
         # 输入输出配置
-        'input_dir': 'api_conf',
+        'api_conf': 'api_conf',            # .api 文件目录（相对于脚本目录）
         'output_dir': '../lib/common/net',
-        'package_name': None,          # 包名（None 时自动从 pubspec.yaml 读取）
+        'package_name': None,              # 包名（None 时自动从 pubspec.yaml 读取）
+
+        # 忽略文件配置
+        'ignore_api_conf_files': [],       # 不解析的 .api 文件名列表
 
         # 模型配置
-        'model_prefix': 'FLX',        # 结构体名前缀（如：FLX）
-        'model_suffix': '',           # 结构体名后缀
-        'model_field_rename': '',     #
+        'model_prefix': 'FLX',            # 结构体名前缀（如：FLX）
+        'model_suffix': '',               # 结构体名后缀
+        'model_field_rename': '',         #
         'skip_req_models': True,
-        'skip_empty_structs': True,   # 跳过空结构体
-        'all_fields_nullable': True,  # 所有字段设置为可空类型
+        'skip_empty_structs': True,       # 跳过空结构体
+        'all_fields_nullable': True,      # 所有字段设置为可空类型
 
         # API 配置
         'api_prefix': 'FLX',
         'api_suffix': 'Api',
-        'common_header': '',          # 公共请求头结构体名称（如：CommonHeader）
+        'common_header': '',              # 公共请求头结构体名称（如：CommonHeader）
 
         # 代码风格配置
         'use_json_serializable': True,
@@ -161,7 +164,8 @@ class GeneratorConfig:
         if config_dict:
             config.update(config_dict)
 
-        self.input_dir = config.get('input_dir', '../api_conf')
+        # 输入目录：优先使用 gen_config.json 中的 api_conf 配置
+        self.api_conf_dir = config.get('api_conf', 'api_conf')
         self.output_dir = config.get('output_dir', '..')
         self.package_name = config.get('package_name')
         self.model_prefix = config.get('model_prefix', '')
@@ -176,6 +180,8 @@ class GeneratorConfig:
         self.use_json_serializable = config.get('use_json_serializable', True)
         self.generate_comments = config.get('generate_comments', True)
         self.use_null_safety = config.get('use_null_safety', True)
+        # 忽略文件列表
+        self.ignore_api_conf_files: List[str] = config.get('ignore_api_conf_files', [])
         self.type_mapping = {
             'string': 'String',
             'int': 'int',
@@ -331,30 +337,41 @@ class ApiParser:
         return structs
 
     def _find_type_blocks(self, content: str) -> List[str]:
-        """查找所有 type (...) 块的内容
+        """查找所有 type 块的内容
 
-        使用自定义解析而非正则，以正确处理 JSON tag 中的 ) 字符。
-        Go API 文件中的 type块格式: type ( ... )
-        结构体字段的 JSON tag 可能是 `json:"field,optional"` 或 `form:"x,default=y)"`,
-        其中可能包含 ) 字符，正则的 non-greedy匹配会错误地在这些地方停止。
+        支持两种 go-zero API 格式:
+        1. 分组格式: type ( Struct1 { ... } Struct2 { ... } )
+        2. 单独格式: type Struct1 { ... }
         """
         blocks = []
         search_from = 0
+
+        # 1. 查找分组的 type (...) 块
         while True:
-            #找 type ( 开头
             start = content.find('type (', search_from)
             if start == -1:
                 break
-            # type ( 之后开始匹配 content
             open_paren_pos = start + len('type (')
-            # 跳过开括号
             content_start = open_paren_pos
-            # 找匹配的闭括号（跳过引号内的 )）
             close_pos = self._find_closing_paren(content, content_start)
             if close_pos == -1:
                 break
             blocks.append(content[content_start:close_pos])
             search_from = close_pos + 1
+
+        # 2. 查找单独的 type StructName { ... } 块（不是 type ( 开头）
+        for match in re.finditer(r'type\s+(?!\()(\w+)\s*\{', content):
+            struct_name = match.group(1)
+            # 找到 { 的位置
+            brace_pos = content.find('{', match.start())
+            if brace_pos == -1:
+                continue
+            close_pos = self._find_closing_brace(content, brace_pos)
+            if close_pos == -1:
+                continue
+            body = content[brace_pos + 1:close_pos]
+            blocks.append(f"{struct_name} {{\n{body}\n}}")
+
         return blocks
 
     def _find_closing_paren(self, content: str, from_pos: int) -> int:
@@ -384,6 +401,41 @@ class ApiParser:
                 continue
             elif c == ')' and not in_backtick and not in_quote:
                 return i
+            i += 1
+        return -1
+
+    def _find_closing_brace(self, content: str, from_pos: int) -> int:
+        """从 from_pos 开始查找匹配的闭花括号 }
+
+        from_pos 应指向开始的 { 字符位置。
+        跳过引号、反引号字符串以及注释中的 } 字符。
+        """
+        i = from_pos + 1  # 跳过开 {
+        in_backtick = False
+        in_quote = False
+        depth = 1
+        while i < len(content):
+            c = content[i]
+            if c == '`' and not in_quote:
+                in_backtick = not in_backtick
+            elif c == '"' and not in_backtick:
+                if i > 0 and content[i - 1] == '\\':
+                    pass
+                elif in_quote:
+                    in_quote = False
+                else:
+                    in_quote = True
+            elif c == '/' and not in_backtick and not in_quote and i + 1 < len(content) and content[i + 1] == '/':
+                # 跳过单行注释直到行尾
+                while i < len(content) and content[i] != '\n':
+                    i += 1
+                continue
+            elif c == '{' and not in_backtick and not in_quote:
+                depth += 1
+            elif c == '}' and not in_backtick and not in_quote:
+                depth -= 1
+                if depth == 0:
+                    return i
             i += 1
         return -1
 
@@ -1188,7 +1240,7 @@ class ApiCodeGenerator:
         lines = []
 
         method_enum = f"FLXApiMethod.{endpoint.method.lower()}"
-        api_constant = f"{self.config.api_prefix}Apis.{self._to_snake_case(endpoint.handler)}"
+        api_constant = f"{self.config.api_prefix}Apis.{self._to_camel_case(endpoint.handler)}"
 
         # 收集不同类型的字段
         body_fields = []
@@ -1289,13 +1341,19 @@ class ApisConstantGenerator:
 
     def generate_constant(self, endpoint: ApiEndpoint) -> str:
         """生成单个 API 常量"""
-        const_name = self._to_snake_case(endpoint.handler)
+        const_name = self._to_camel_case(endpoint.handler)
         return f"  static const String {const_name} = \"{endpoint.path}\";"
 
-    def _to_snake_case(self, camel_str: str) -> str:
-        """转换为 snake_case"""
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', camel_str)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+    def _to_camel_case(self, name: str) -> str:
+        """转换为 camelCase，支持 snake_case 和 PascalCase"""
+        # 处理 snake_case
+        if '_' in name:
+            components = name.split('_')
+            return components[0].lower() + ''.join(x.capitalize() for x in components[1:])
+        # 处理 PascalCase（如 PhoneLogin -> phoneLogin）
+        if name and name[0].isupper():
+            return name[0].lower() + name[1:]
+        return name
 
 
 # ==================== 主程序 ====================
@@ -1314,7 +1372,7 @@ class ApiGenerator:
     def run(self):
         """运行代码生成"""
         script_dir = Path(__file__).parent.resolve()
-        input_path = script_dir / self.config.input_dir
+        input_path = script_dir / self.config.api_conf_dir
         output_path = script_dir / self.config.output_dir
 
         if not input_path.exists():
@@ -1340,8 +1398,12 @@ class ApiGenerator:
 
         # 第一阶段：解析所有 API 文件
         all_api_files: List[ApiFile] = []
+        ignore_set = set(self.config.ignore_api_conf_files)
         for api_file_path in sorted(input_path.glob('*.api')):
             if api_file_path.name == 'main.api':
+                continue
+            if api_file_path.name in ignore_set:
+                print(f"跳过(ignore_api_conf_files): {api_file_path.name}")
                 continue
             api_file = self.parser.parse_file(str(api_file_path))
             all_api_files.append(api_file)
