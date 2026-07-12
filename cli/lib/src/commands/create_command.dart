@@ -1,34 +1,7 @@
 import 'dart:io';
+import '../utils.dart';
 
 class CreateCommand {
-  /// 获取 flux_gen 目录路径
-  String get _fluxGenDir {
-    final scriptPath = Platform.script.toFilePath();
-
-    // 全局激活时: ~/.pub-cache/global_packages/flux/bin/xxx.snapshot
-    if (scriptPath.contains('.pub-cache/global_packages')) {
-      var dir = File(scriptPath).parent;
-      for (int i = 0; i < 5; i++) {
-        dir = dir.parent;
-        if (dir.path.contains('.pub-cache/git/flux-')) {
-          return '${dir.path}/packages/flux_gen';
-        }
-      }
-      final homeGitFlux = '${Platform.environment['HOME']}/.pub-cache/git/flux-';
-      final gitDir = Directory('${Platform.environment['HOME']}/.pub-cache/git');
-      if (gitDir.existsSync()) {
-        for (final entry in gitDir.listSync()) {
-          if (entry is Directory && entry.path.startsWith(homeGitFlux)) {
-            return '${entry.path}/packages/flux_gen';
-          }
-        }
-      }
-    }
-
-    // 本地开发时: cli/bin/flux.dart -> flux/ -> 仓库根
-    final fluxRoot = File(scriptPath).parent.parent.parent.path;
-    return '$fluxRoot/packages/flux_gen';
-  }
 
   void execute({
     required String projectName,
@@ -166,7 +139,7 @@ class App extends StatelessWidget {
     final scriptsPath = scriptsDir.path;
     scriptsDir.createSync(recursive: true);
 
-    final sourceDir = _fluxGenDir;
+    final sourceDir = findFluxGenDir();
     if (!Directory(sourceDir).existsSync()) {
       print('   Warning: flux_gen not found at $sourceDir');
       return;

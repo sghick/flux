@@ -1,25 +1,7 @@
 import 'dart:io';
+import '../utils.dart';
 
 class GenCommand {
-  /// Flux 仓库根目录
-  String get _fluxRoot {
-    return File(Platform.script.toFilePath()).parent.parent.parent.path;
-  }
-
-  /// 获取 flux_gen 脚本源路径
-  String get _genSourceDir {
-    final cliRoot = File(Platform.script.toFilePath()).parent.parent.path;
-
-    // 全局激活时
-    if (Directory('$cliRoot/scripts').existsSync()) {
-      return '$cliRoot/scripts';
-    }
-    // 本地开发时
-    if (Directory('$_fluxRoot/packages/flux_gen').existsSync()) {
-      return '$_fluxRoot/packages/flux_gen';
-    }
-    return '$cliRoot/scripts';
-  }
 
   void execute() {
     print('🔧 Installing Flux code generators...');
@@ -32,7 +14,12 @@ class GenCommand {
       print('   Created: scripts/');
     }
 
-    final sourceDir = _genSourceDir;
+    final sourceDir = findFluxGenDir();
+    if (!Directory(sourceDir).existsSync()) {
+      print('Error: flux_gen not found at $sourceDir');
+      print('Make sure Flux CLI is installed correctly.');
+      exit(1);
+    }
     print('   Source: $sourceDir');
 
     // 复制生成器脚本
