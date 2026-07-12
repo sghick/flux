@@ -1,11 +1,6 @@
 import 'dart:io';
 
 class GenCommand {
-  /// CLI 包根目录（cli/）
-  String get _cliRoot {
-    return File(Platform.script.toFilePath()).parent.parent.path;
-  }
-
   /// Flux 仓库根目录
   String get _fluxRoot {
     return File(Platform.script.toFilePath()).parent.parent.parent.path;
@@ -13,21 +8,22 @@ class GenCommand {
 
   /// 获取 flux_gen 脚本源路径
   String get _genSourceDir {
-    // 全局激活时: cli/scripts/
-    if (Directory('$_cliRoot/scripts').existsSync()) {
-      return '$_cliRoot/scripts';
+    final cliRoot = File(Platform.script.toFilePath()).parent.parent.path;
+
+    // 全局激活时
+    if (Directory('$cliRoot/scripts').existsSync()) {
+      return '$cliRoot/scripts';
     }
-    // 本地开发时: packages/flux_gen/
+    // 本地开发时
     if (Directory('$_fluxRoot/packages/flux_gen').existsSync()) {
       return '$_fluxRoot/packages/flux_gen';
     }
-    return '$_cliRoot/scripts';
+    return '$cliRoot/scripts';
   }
 
   void execute() {
     print('🔧 Installing Flux code generators...');
 
-    // 检查是否已有 scripts 目录
     final scriptsDir = Directory('scripts');
     if (scriptsDir.existsSync()) {
       print('✅ scripts/ directory already exists');

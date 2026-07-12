@@ -6,9 +6,7 @@ class CreateCommand {
     final scriptPath = Platform.script.toFilePath();
 
     // 全局激活时: ~/.pub-cache/global_packages/flux/bin/xxx.snapshot
-    // 需要找到 git 目录: ~/.pub-cache/git/flux-xxx/packages/flux_gen
     if (scriptPath.contains('.pub-cache/global_packages')) {
-      // 向上查找 git 目录
       var dir = File(scriptPath).parent;
       for (int i = 0; i < 5; i++) {
         dir = dir.parent;
@@ -16,9 +14,8 @@ class CreateCommand {
           return '${dir.path}/packages/flux_gen';
         }
       }
-      // fallback: 从 HOME 目录查找
       final homeGitFlux = '${Platform.environment['HOME']}/.pub-cache/git/flux-';
-      final gitDir = Directory(Platform.environment['HOME']! + '/.pub-cache/git');
+      final gitDir = Directory('${Platform.environment['HOME']}/.pub-cache/git');
       if (gitDir.existsSync()) {
         for (final entry in gitDir.listSync()) {
           if (entry is Directory && entry.path.startsWith(homeGitFlux)) {
@@ -28,17 +25,14 @@ class CreateCommand {
       }
     }
 
-    // 本地开发时: 从脚本位置向上 3 级
-    // cli/bin/flux.dart -> cli/ -> flux/ -> 仓库根
+    // 本地开发时: cli/bin/flux.dart -> flux/ -> 仓库根
     final fluxRoot = File(scriptPath).parent.parent.parent.path;
     return '$fluxRoot/packages/flux_gen';
   }
 
   void execute({
     required String projectName,
-    String? template,
     String? org,
-    bool noExample = false,
   }) {
     print('🚀 Creating Flux project: $projectName');
     final projectDir = Directory(projectName);
@@ -69,11 +63,11 @@ class CreateCommand {
       File(pubspecPath).writeAsStringSync(pubspec);
     }
 
-    // Step 3: 创建项目结构
+    // Step 3: 创建完整项目结构
     print('📄 Creating project structure...');
     _createProjectStructure(projectDir.path);
 
-    // Step 4: 复制 scripts
+    // Step 4: 复制代码生成器
     _setupScripts(projectDir.path);
 
     // Step 5: flutter pub get
@@ -88,20 +82,45 @@ class CreateCommand {
       print(pubGetResult.stderr);
     }
 
-    // Step 6: 完成
     print('\n✅ Project "$projectName" created successfully!');
     print('\nNext steps:');
     print('  cd $projectName');
     print('  flutter run');
-    print('');
-    print('To customize the app, edit lib/main.dart');
   }
+
+  // ---- 项目结构 ----
 
   void _createProjectStructure(String projectPath) {
     final libDir = Directory('$projectPath/lib');
 
-    // main.dart
+    // 覆盖 main.dart
     _createMainFile('${libDir.path}/main.dart');
+
+    // 目录结构（合并自 init 的完整结构）
+    final dirs = [
+      'lib/config',
+      'lib/consts',
+      'lib/routes',
+      'lib/ui/handlers',
+    ];
+    for (final dir in dirs) {
+      Directory('$projectPath/$dir').createSync(recursive: true);
+    }
+
+    // 模板文件
+    _writeFile('$projectPath/lib/config/config.dart', _configTemplate());
+    _writeFile('$projectPath/lib/consts/strings.dart', 'class AppStrings {}');
+    _writeFile('$projectPath/lib/consts/urls.dart', 'class AppUrls {}');
+    _writeFile('$projectPath/lib/consts/events.dart', 'class AppEvents {}');
+    _writeFile('$projectPath/lib/routes/route_config.dart', _routeConfigTemplate());
+    _writeFile('$projectPath/lib/routes/route_config.path.dart', _routePathTemplate());
+    _writeFile('$projectPath/lib/routes/route_config.pages.dart', _routePagesTemplate());
+    _writeFile('$projectPath/lib/routes/page_params.dart', _pageParamsTemplate());
+    _writeFile('$projectPath/lib/routes/route_navigator.dart', _routeNavigatorTemplate());
+  }
+
+  void _writeFile(String path, String content) {
+    File(path).writeAsStringSync(content);
   }
 
   void _createMainFile(String mainPath) {
@@ -140,12 +159,13 @@ class App extends StatelessWidget {
 ''');
   }
 
+  // ---- 代码生成器 ----
+
   void _setupScripts(String projectPath) {
     final scriptsDir = Directory('$projectPath/scripts');
     final scriptsPath = scriptsDir.path;
     scriptsDir.createSync(recursive: true);
 
-    // 直接从 flux_gen 目录复制整个内容
     final sourceDir = _fluxGenDir;
     if (!Directory(sourceDir).existsSync()) {
       print('   Warning: flux_gen not found at $sourceDir');
@@ -154,14 +174,11 @@ class App extends StatelessWidget {
 
     print('   Copying flux_gen from: $sourceDir');
 
-    // 复制所有文件和目录
     int copiedCount = 0;
     int skippedCount = 0;
 
     for (final entity in Directory(sourceDir).listSync(recursive: false)) {
       final name = entity.path.split('/').last;
-
-      // 跳过隐藏文件
       if (name.startsWith('.')) continue;
 
       final destPath = '$scriptsPath/$name';
@@ -170,16 +187,13 @@ class App extends StatelessWidget {
 
       if (entity is File) {
         if (destFile.existsSync()) {
-          print('   Skipped: $name (already exists)');
           skippedCount++;
         } else {
           entity.copySync(destPath);
-          print('   Copied: $name');
           copiedCount++;
         }
       } else if (entity is Directory) {
-        _copyDirectoryRecursive(entity, destDir);
-        print('   Copied: $name/');
+        _copyDir(entity, destDir);
         copiedCount++;
       }
     }
@@ -187,7 +201,7 @@ class App extends StatelessWidget {
     print('   Summary: $copiedCount copied, $skippedCount skipped');
   }
 
-  void _copyDirectoryRecursive(Directory source, Directory dest) {
+  void _copyDir(Directory source, Directory dest) {
     dest.createSync(recursive: true);
     for (final entity in source.listSync(recursive: false)) {
       final name = entity.path.split('/').last;
@@ -195,8 +209,71 @@ class App extends StatelessWidget {
       if (entity is File) {
         entity.copySync('${dest.path}/$name');
       } else if (entity is Directory) {
-        _copyDirectoryRecursive(entity, Directory('${dest.path}/$name'));
+        _copyDir(entity, Directory('${dest.path}/$name'));
       }
     }
   }
+
+  // ---- 模板内容 ----
+
+  String _configTemplate() => '''
+class AppConfig {
+  final String host;
+  final String appName;
+
+  const AppConfig({
+    this.host = 'http://localhost:8080',
+    this.appName = 'my_app',
+  });
+
+  static const AppConfig current = AppConfig();
+}
+''';
+
+  String _routeConfigTemplate() => '''
+import 'package:get/get.dart';
+
+part 'route_config.pages.dart';
+part 'route_config.path.dart';
+
+class RouteConfig {
+  static final List<GetPage> getPages = RoutePages.getPages;
+}
+''';
+
+  String _routePathTemplate() => '''
+class RoutePath {
+  static const String pathSplash = '/auth/splash';
+  static const String pathWeb = '/others/web';
+}
+''';
+
+  String _routePagesTemplate() => '''
+import 'package:get/get.dart';
+
+part of 'route_config.dart';
+
+class RoutePages {
+  static final List<GetPage> getPages = [];
+}
+''';
+
+  String _pageParamsTemplate() => '''
+class FLXParams {
+  static const String url = 'url';
+  static const String title = 'title';
+}
+''';
+
+  String _routeNavigatorTemplate() => '''
+import 'package:get/get.dart';
+import 'route_config.dart';
+
+final nav = FLXNavigator();
+
+class FLXNavigator {
+  Future<T?> goWebPage<T>(String url, {String title = ''}) =>
+      Get.toNamed<T>(RoutePath.pathWeb, arguments: {FLXParams.url: url, FLXParams.title: title});
+}
+''';
 }
