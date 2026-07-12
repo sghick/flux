@@ -48,6 +48,7 @@ class GenCommand {
       'gen_pages.sh',
       'gen_api.sh',
       'gen_page_config.json',
+      'gen_config.json',
     ];
 
     print('');
