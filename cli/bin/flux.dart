@@ -3,48 +3,22 @@
 import 'dart:io';
 import 'package:args/args.dart';
 import 'package:yaml/yaml.dart';
+import '../lib/src/commands/clean_command.dart';
 import '../lib/src/commands/create_command.dart';
 import '../lib/src/commands/gen_command.dart';
 
 String getVersion() {
   final scriptPath = Platform.script.toFilePath();
-  final parentDir = File(scriptPath).parent.path;
-  final parentParentDir = File(scriptPath).parent.parent.path;
+  var dir = Directory(File(scriptPath).parent.path);
 
-  final candidates = [
-    '$parentParentDir/pubspec.yaml',
-    '$parentDir/pubspec.yaml',
-    '$parentDir/packages/flux/cli/pubspec.yaml',
-  ];
-
-  for (final path in candidates) {
-    final file = File(path);
-    if (file.existsSync()) {
-      final content = file.readAsStringSync();
-      final yaml = loadYaml(content) as YamlMap;
-      return yaml['version'] ?? '0.0.0';
-    }
-  }
-
-  final gitCacheDir = Platform.environment['PUB_CACHE']
-      ?? '${Platform.environment['HOME']}/.pub-cache';
-  final gitFluxDir = Directory('$gitCacheDir/git')
-      .listSync()
-      .whereType<Directory>()
-      .firstWhere(
-        (d) => d.path.contains('flux-'),
-        orElse: () => Directory(''),
-      );
-
-  if (gitFluxDir.path.isNotEmpty) {
-    final pubspec = File('${gitFluxDir.path}/cli/pubspec.yaml');
+  for (int i = 0; i < 10; i++) {
+    final pubspec = File('${dir.path}/pubspec.yaml');
     if (pubspec.existsSync()) {
-      final content = pubspec.readAsStringSync();
-      final yaml = loadYaml(content) as YamlMap;
+      final yaml = loadYaml(pubspec.readAsStringSync()) as YamlMap;
       return yaml['version'] ?? '0.0.0';
     }
+    dir = dir.parent;
   }
-
   return '0.0.0';
 }
 
@@ -54,6 +28,7 @@ void main(List<String> arguments) {
       ..addOption('org', help: 'Organization (e.g., com.example)')
     )
     ..addCommand('gen', ArgParser())
+    ..addCommand('clean', ArgParser())
     ..addFlag('version', abbr: 'v', help: 'Print version', defaultsTo: false);
 
   final results = parser.parse(arguments);
@@ -67,6 +42,7 @@ void main(List<String> arguments) {
     print('Commands:');
     print('  create    Create a new Flutter project with Flux framework');
     print('  gen       Install/update code generators (gen_pages, gen_api)');
+    print('  clean     Remove leftover flux-xxx cache directories');
     print('');
     print('Run "flux help <command>" for more information.');
     return;
@@ -89,9 +65,12 @@ void main(List<String> arguments) {
     case 'gen':
       GenCommand().execute();
       break;
+    case 'clean':
+      CleanCommand().execute();
+      break;
     default:
       print('Unknown command: ${results.command!.name}');
-      print('Available commands: create, gen');
+      print('Available commands: create, gen, clean');
       exit(1);
   }
 }
