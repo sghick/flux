@@ -57,7 +57,7 @@ flux create my_app --org com.example
 
 1. 执行 `flutter create`
 2. 添加 `flux_core` 依赖（git 引用）
-3. 创建完整项目结构（`config/`、`consts/`、`routes/`、`ui/handlers/`）
+3. 创建完整项目结构（`config/`、`consts/`、`routes/`）
 4. 复制代码生成器到 `scripts/`
 5. 执行 `flutter pub get`
 
@@ -88,7 +88,6 @@ my_app/
 │   ├── config/             # 应用配置 (config.dart)
 │   ├── consts/             # 常量 (strings/urls/events)
 │   ├── routes/             # 路由系统 (route_config/navigator/page_params)
-│   ├── ui/handlers/        # UI 代理注入示例
 │   └── main.dart           # 应用入口 (GetMaterialApp)
 ├── scripts/                # 代码生成器 (gen_pages.py / gen_api.py)
 │   ├── templates/          # 页面模板
@@ -181,8 +180,7 @@ api.query<User>(
 创建项目后：
 
 1. `lib/config/config.dart` — 应用配置
-2. `lib/ui/handlers/` — 注入自定义 UI 实现
-3. `lib/routes/` — 定义路由
+2. `lib/routes/` — 定义路由
 
 ```bash
 cd my_app

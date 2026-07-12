@@ -74,7 +74,6 @@ class CreateCommand {
       'lib/config',
       'lib/consts',
       'lib/routes',
-      'lib/ui/handlers',
     ];
     for (final dir in dirs) {
       Directory('$projectPath/$dir').createSync(recursive: true);
