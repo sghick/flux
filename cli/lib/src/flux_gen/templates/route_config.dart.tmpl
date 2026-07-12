@@ -1,0 +1,22 @@
+import 'package:{package}/pages/others/web/web_page.dart';
+import 'package:get/get.dart';
+
+part 'route_config.pages.dart';
+part 'route_config.path.dart';
+
+class RouteConfig {
+  static final List<GetPage> getPages = RoutePages.getPages;
+}
+
+class {prefix}GetPage extends GetPage {
+  static const Duration transitionDurationNormal = Duration(milliseconds: 350);
+
+  {prefix}GetPage({
+    required super.name,
+    required super.page,
+    super.transition = Transition.rightToLeft,
+    super.transitionDuration = transitionDurationNormal,
+    super.customTransition,
+    super.parameters,
+  });
+}

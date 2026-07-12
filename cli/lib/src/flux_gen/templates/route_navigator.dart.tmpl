@@ -1,0 +1,25 @@
+import 'package:app_settings/app_settings.dart';
+import 'package:flux_core/flux_core.dart';
+import 'package:{package}/common/errors/app_errors.dart';
+import 'package:{package}/common/services/auth_service.dart';
+import 'package:{package}/common/utils/getx_utils.dart';
+import 'package:{package}/consts/urls.dart';
+import 'package:{package}/routes/page_params.dart';
+import 'package:{package}/routes/route_config.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+part 'route_navigator.native.dart';
+
+part 'route_navigator.util.dart';
+
+var globalContext = Get.context!;
+
+final nav = {prefix}Navigator();
+
+class {prefix}Navigator extends {prefix}BaseNavigator {
+  // Add your own navigator here, like:
+  Future<T?> goWebPage<T>(String url, {String title = ''}) =>
+      _getToNamed<T>(RoutePath.pathWeb, arguments: {{prefix}Params.url: url, {prefix}Params.title: title});
+}

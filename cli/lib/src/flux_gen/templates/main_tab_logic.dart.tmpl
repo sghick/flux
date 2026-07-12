@@ -1,0 +1,19 @@
+import 'package:get/get.dart';
+
+
+{enum_code}
+class {prefix}MainTabLogic extends GetxController {
+  final currentIndex = 0.obs;
+
+  void switchTab(int index) {
+{index_body}
+  }
+
+  void switchTo(MainTab tab) {
+    currentIndex.value = tab.index;
+  }
+}
+
+mixin {prefix}MainTabLogicMixin {
+  late final {prefix}MainTabLogic logic = Get.put({prefix}MainTabLogic());
+}

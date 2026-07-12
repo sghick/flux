@@ -1,0 +1,12 @@
+{
+  "prefix": "FLX",
+  "package": "None",
+  "modelFieldRename": "FieldRename.none",
+  "commonHeader": "CommonHeader",
+  "api_conf": "api_conf",
+  "ignore_api_conf_files": [
+    "admin.api"
+  ],
+  "src_dir": "/services/api_conf",
+  "dst_dir": "/custom/scripts"
+}

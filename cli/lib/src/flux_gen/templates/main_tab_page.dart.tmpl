@@ -1,0 +1,71 @@
+import 'package:{package}/common/styles/color_style.dart';
+{page_imports}
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
+import 'main_tab_logic.dart';
+
+class {prefix}MainTabPage extends StatefulWidget {
+  const {prefix}MainTabPage({super.key});
+
+  @override
+  State<{prefix}MainTabPage> createState() => _{prefix}MainTabPageState();
+}
+
+class _{prefix}MainTabPageState extends State<{prefix}MainTabPage> with {prefix}MainTabLogicMixin {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: {prefix}ColorStyles.surface,
+      body: Obx(
+        () => IndexedStack(index: logic.currentIndex.value, children: const [{indexed_stack_pages}]),
+      ),
+      bottomNavigationBar: Obx(
+        () => Container(
+          decoration: BoxDecoration(
+            color: {prefix}ColorStyles.white,
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))],
+          ),
+          child: SafeArea(
+            child: SizedBox(
+              height: 60,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+{tab_items}
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabItem({required IconData icon, required IconData activeIcon, required String label, required int index}) {
+    final isSelected = logic.currentIndex.value == index;
+
+    return GestureDetector(
+      onTap: () => logic.switchTab(index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        color: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(isSelected ? activeIcon : icon, size: 24, color: isSelected ? {prefix}ColorStyles.primary : {prefix}ColorStyles.disabled),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: isSelected ? {prefix}ColorStyles.primary : {prefix}ColorStyles.disabled,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

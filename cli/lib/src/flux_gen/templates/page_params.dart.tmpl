@@ -1,0 +1,17 @@
+import 'package:get/get.dart';
+
+extension {prefix}ParamsForGetExt on String {
+  dynamic get argValue => Get.arguments?[this];
+
+  set argValue(value) => Get.arguments?[this] = value;
+
+  String? get paramValue => Get.parameters[this];
+
+  set paramValue(value) => Get.parameters[this] = value;
+}
+
+class {prefix}Params {
+  // Add your params here, like:
+  static const url = 'url';
+  static const title = 'title';
+}
