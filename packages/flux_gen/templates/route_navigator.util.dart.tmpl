@@ -13,8 +13,8 @@ class {prefix}BaseNavigator {
   }
 
   /// go back until
-  void goBackUntil(String page) {
-    _getOffNamed(page);
+  void goBackUntil(String page, {dynamic arguments, int? id, bool preventDuplicates = true, Map<String, String>? parameters}) {
+    _getOffNamed(page, arguments: arguments, id: id, preventDuplicates: preventDuplicates, parameters: parameters);
   }
 
   /// is current page
@@ -26,6 +26,12 @@ class {prefix}BaseNavigator {
 void _goBack<T>({T? result, bool closeOverlays = false, bool canPop = true, int? id}) {
   FLXGetxUtils.hideLoading();
   Get.back<T>(result: result, closeOverlays: closeOverlays, canPop: canPop, id: id);
+}
+
+
+void _until<T>(RoutePredicate predicate, {dynamic arguments, int? id}) {
+  FLXGetxUtils.hideLoading();
+  Get.until(predicate, id: id);
 }
 
 Future<T?> _offNamedUntil<T>(String newRouteName, {int? id, dynamic arguments, Map<String, String>? parameters}) {

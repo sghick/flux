@@ -13,7 +13,7 @@ PageJumpUnhandledUrlHandler unhandledUrlHandler = (url, uri, object) {
 };
 
 AuthHandler authHandler = ({onPassed, onCanceled, authType}) {
-  authService.checkingAuth(onPassed: onPassed, onCanceled: onCanceled, authType: authType);
+  authService.checkingAuth(onPassed: onPassed, onCanceled: onCanceled, requiredChecks: authType);
 };
 
 final PageJumpConfig webJumpConfig = PageJumpConfig(
