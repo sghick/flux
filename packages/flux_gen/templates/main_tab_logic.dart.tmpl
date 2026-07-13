@@ -6,12 +6,11 @@ class {prefix}MainTabLogic extends GetxController {
   final currentIndex = 0.obs;
 
   void switchTab(int index) {
-{index_body}
+    if (index == currentIndex.value) return; // 已在当前 tab，不重复切换
+    currentIndex.value = index;
   }
 
-  void switchTo(MainTab tab) {
-    currentIndex.value = tab.index;
-  }
+  void switchTo(MainTab tab) => switchTab(tab.index);
 }
 
 mixin {prefix}MainTabLogicMixin {
