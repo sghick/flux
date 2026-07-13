@@ -1,6 +1,11 @@
 {
   "main_tab": "/main_tab",
   "pages": [
+    "splash /auth/splash",
+    "onboarding /auth/onboarding",
+    "welcome /auth/welcome",
+    "login /auth/login",
+
     "home /home",
     "tab1 /tab1",
     "tab2 /tab2",

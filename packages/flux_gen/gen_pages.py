@@ -490,11 +490,16 @@ def cmd_generate(pages, tab_order, main_tab=None):
                 main_tab_page_file = target_dir / "main_tab_page.dart"
                 main_tab_page_file.write_text(main_tab_content, encoding="utf-8")
 
-            # 生成 main_tab_logic.dart（使用标准模板）
-            with open(TEMPLATES_DIR / "logic.dart.tmpl", "r", encoding="utf-8") as f:
+            # 生成 main_tab_logic.dart（使用 main_tab 专用模板）
+            with open(TEMPLATES_DIR / "main_tab_logic.dart.tmpl", "r", encoding="utf-8") as f:
                 logic_template = f.read()
-            logic_content = logic_template.replace("{name}", "main_tab").replace("{Name}", "MainTab").replace("{package}", PACKAGE_NAME)
-            logic_content = apply_template_all_placeholder(logic_content, CLASS_PREFIX)
+            # 替换枚举占位符
+            enum_values = ", ".join(tab_order)
+            enum_code = f"\nenum MainTab {{ {enum_values} }}\n"
+            logic_template = logic_template.replace("{enum_code}", enum_code)
+            # 替换 index_body 占位符
+            logic_template = logic_template.replace("{index_body}", "    currentIndex.value = index;\n")
+            logic_content = apply_template_all_placeholder(logic_template, CLASS_PREFIX)
 
             main_tab_logic_file = target_dir / "main_tab_logic.dart"
             main_tab_logic_file.write_text(logic_content, encoding="utf-8")
@@ -762,7 +767,7 @@ def update_route_navigator(pages, main_tab=None, verbose=False):
 
 
 def update_main_tab_logic(tab_order):
-    """更新 main_tab_logic.dart - 生成 Tab 枚举"""
+    """更新 main_tab_logic.dart - 生成 Tab 枚举，替换模板占位符"""
     if not MAIN_TAB_LOGIC_FILE.exists():
         return
 
@@ -773,34 +778,40 @@ def update_main_tab_logic(tab_order):
     enum_values = ", ".join(tab_order)
     enum_code = f"\nenum MainTab {{ {enum_values} }}\n"
 
-    # 生成 switchTo 方法
-    switch_code = '''
-  void switchTo(MainTab tab) {
-    currentIndex.value = tab.index;
-  }
-'''
-
-    # 在 import 后插入枚举
-    if "enum MainTab" not in content:
+    # 1. 替换 {enum_code} 占位符（如果存在）
+    if "{enum_code}" in content:
+        content = content.replace("{enum_code}", enum_code)
+    elif "enum MainTab" not in content:
+        # 兜底：文件没有占位符也没有枚举，在第一个 import 后插入
         content = re.sub(
             r"(import 'package:get/get.dart';)",
             rf'\1{enum_code}',
             content
         )
 
-    # 插入 switchTo 方法
+    # 2. 替换 {index_body} 占位符（如果存在）
+    if "{index_body}" in content:
+        content = content.replace("{index_body}", "    currentIndex.value = index;\n")
+
+    # 3. 确保 switchTo 方法存在（插入在 switchTab 方法闭合 } 之后，而非方法体内部）
     if "void switchTo" not in content:
+        switch_code = '''\n  void switchTo(MainTab tab) {
+    currentIndex.value = tab.index;
+  }
+'''
+        # 匹配 switchTab 方法整块，在其 } 后插入 switchTo
         content = re.sub(
-            r'(  void switchTab\(int index\) \{)',
+            r'(  void switchTab\(int index\) \{.*?\n  \})',
             rf'\1{switch_code}',
-            content
+            content,
+            flags=re.DOTALL
         )
 
     if content != original_content:
         MAIN_TAB_LOGIC_FILE.write_text(content, encoding="utf-8")
         print(f"已更新 {MAIN_TAB_LOGIC_FILE.name}")
     else:
-        print(f"main_tab_logic.dart 无需更新")
+        print(f"{MAIN_TAB_LOGIC_FILE.name} 无需更新")
 
 
 def update_page_params(pages):
@@ -951,7 +962,12 @@ def cmd_init():
     if not MAIN_TAB_LOGIC_FILE.exists():
         template_file = TEMPLATES_DIR / "main_tab_logic.dart.tmpl"
         if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
+            content = template_file.read_text(encoding="utf-8")
+            # 替换 {enum_code}：init 时用空 enum，后续 update_main_tab_logic() 会更新
+            content = content.replace("{enum_code}", "")
+            # 替换 {index_body}：默认行为
+            content = content.replace("{index_body}", "    currentIndex.value = index;\n")
+            content = apply_template_all_placeholder(content, CLASS_PREFIX)
         else:
             content = "import 'package:get/get.dart';\n\nclass " + CLASS_PREFIX + "MainTabLogic extends GetxController {\n  final currentIndex = 0.obs;\n}\n"
 
