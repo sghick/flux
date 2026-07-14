@@ -73,22 +73,18 @@ FLXLocalStorage localStorage = FLXLocalStorage._();
 
 class FLXLocalStorage {
   final FLXSharedPreference pref = FLXSharedPreference();
-  FLXGroupSharedPreference? group;
+  final FLXGroupSharedPreference group = FLXGroupSharedPreference();
 
   FLXLocalStorage._();
 
   Future<void> init({String? groupId}) async {
     await pref.init();
     if (groupId != null) {
-      group = FLXGroupSharedPreference(groupId: groupId);
-      await group!.init();
+      await group.init(groupId: groupId);
+    } else {
+      logW('FLXLocalStorage: groupId not provided, App Group storage unavailable');
     }
     logD('$runtimeType has been initialized');
-  }
-
-  Future<FLXLocalStorage> get safe async {
-    await localStorage.init();
-    return localStorage;
   }
 }
 
