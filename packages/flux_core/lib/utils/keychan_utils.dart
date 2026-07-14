@@ -24,7 +24,7 @@ class FLXKeychainService {
     return FlutterKeychainPlus.get(key: keychainUuid).then((value) {
       if (value == null) {
         final uuid = Uuid().v4().toString();
-        localStorage.setString("deviceId", uuid);
+        localStorage.pref.setString("deviceId", uuid);
         FlutterKeychainPlus.put(key: keychainUuid, value: uuid);
         return uuid;
       }
