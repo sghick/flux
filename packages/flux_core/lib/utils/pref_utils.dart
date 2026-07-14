@@ -3,11 +3,10 @@ import 'dart:convert';
 import 'package:shared_preference_app_group/shared_preference_app_group.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 同步读 + 异步写的统一抽象接口（仅 [FLXSharedPreference] 实现）
+/// 异步读写的统一抽象接口
 abstract class FLXSharedPreferenceInterface {
   Future<void> init();
 
-  // 写 —— 异步
   Future<bool> setInt(String key, int? value);
   Future<bool> setDouble(String key, double? value);
   Future<bool> setString(String key, String? value);
@@ -16,23 +15,22 @@ abstract class FLXSharedPreferenceInterface {
   Future<bool> setMap(String key, Map<String, dynamic>? value);
   Future<bool> setObject(String key, dynamic value);
 
-  // 读 —— 同步（SharedPreferences 内存缓存支持）
-  int? getInt(String key);
-  double? getDouble(String key);
-  String? getString(String key);
-  bool? getBool(String key);
-  List<String>? getStringList(String key);
-  Map<String, dynamic>? getMap(String key);
-  dynamic getObject(String key);
+  Future<int?> getInt(String key);
+  Future<double?> getDouble(String key);
+  Future<String?> getString(String key);
+  Future<bool?> getBool(String key);
+  Future<List<String>?> getStringList(String key);
+  Future<Map<String, dynamic>?> getMap(String key);
+  Future<dynamic> getObject(String key);
 
   Future<bool> remove(String key);
   Future<bool> clear();
-  Set<String> getKeys();
-  bool containsKey(String key);
+  Future<Set<String>> getKeys();
+  Future<bool> containsKey(String key);
   Future<void> reload();
 }
 
-/// 封装 [SharedPreferences] 插件，实现 [FLXSharedPreferenceInterface]
+/// 封装 [SharedPreferences] 插件
 class FLXSharedPreference extends FLXSharedPreferenceInterface {
   late SharedPreferences _pref;
 
@@ -87,28 +85,28 @@ class FLXSharedPreference extends FLXSharedPreferenceInterface {
   }
 
   @override
-  int? getInt(String key) => _pref.getInt(key);
+  Future<int?> getInt(String key) => Future.value(_pref.getInt(key));
 
   @override
-  double? getDouble(String key) => _pref.getDouble(key);
+  Future<double?> getDouble(String key) => Future.value(_pref.getDouble(key));
 
   @override
-  String? getString(String key) => _pref.getString(key);
+  Future<String?> getString(String key) => Future.value(_pref.getString(key));
 
   @override
-  bool? getBool(String key) => _pref.getBool(key);
+  Future<bool?> getBool(String key) => Future.value(_pref.getBool(key));
 
   @override
-  List<String>? getStringList(String key) => _pref.getStringList(key);
+  Future<List<String>?> getStringList(String key) => Future.value(_pref.getStringList(key));
 
   @override
-  Map<String, dynamic>? getMap(String key) {
+  Future<Map<String, dynamic>?> getMap(String key) async {
     final str = _pref.getString(key);
     return str != null && str.isNotEmpty ? json.decode(str) as Map<String, dynamic> : null;
   }
 
   @override
-  dynamic getObject(String key) => _pref.get(key);
+  Future<dynamic> getObject(String key) => Future.value(_pref.get(key));
 
   @override
   Future<bool> remove(String key) => _pref.remove(key);
@@ -117,25 +115,23 @@ class FLXSharedPreference extends FLXSharedPreferenceInterface {
   Future<bool> clear() => _pref.clear();
 
   @override
-  Set<String> getKeys() => _pref.getKeys();
+  Future<Set<String>> getKeys() => Future.value(_pref.getKeys());
 
   @override
-  bool containsKey(String key) => _pref.containsKey(key);
+  Future<bool> containsKey(String key) => Future.value(_pref.containsKey(key));
 
   @override
   Future<void> reload() => _pref.reload();
 }
 
 /// 封装 [SharedPreferenceAppGroup] 插件，用于 iOS/macOS App Group 间的数据共享
-///
-/// 注意：不实现 [FLXSharedPreferenceInterface]，因为 App Group 底层读写均为异步，
-/// 与接口的同步读签名不兼容。请直接通过 [FLXLocalStorage.group] 使用其异步 API。
-class FLXGroupSharedPreference {
+class FLXGroupSharedPreference extends FLXSharedPreferenceInterface {
   final String groupId;
   bool _initialized = false;
 
   FLXGroupSharedPreference({required this.groupId});
 
+  @override
   Future<void> init() async {
     if (!_initialized) {
       await SharedPreferenceAppGroup.setAppGroup(groupId);
@@ -143,6 +139,7 @@ class FLXGroupSharedPreference {
     }
   }
 
+  @override
   Future<bool> setInt(String key, int? value) async {
     if (value != null) {
       await SharedPreferenceAppGroup.setInt(key, value);
@@ -151,6 +148,7 @@ class FLXGroupSharedPreference {
     return remove(key);
   }
 
+  @override
   Future<bool> setDouble(String key, double? value) async {
     if (value != null) {
       await SharedPreferenceAppGroup.setDouble(key, value);
@@ -159,6 +157,7 @@ class FLXGroupSharedPreference {
     return remove(key);
   }
 
+  @override
   Future<bool> setString(String key, String? value) async {
     if (value != null) {
       await SharedPreferenceAppGroup.setString(key, value);
@@ -167,6 +166,7 @@ class FLXGroupSharedPreference {
     return remove(key);
   }
 
+  @override
   Future<bool> setBool(String key, bool? value) async {
     if (value != null) {
       await SharedPreferenceAppGroup.setBool(key, value);
@@ -175,6 +175,7 @@ class FLXGroupSharedPreference {
     return remove(key);
   }
 
+  @override
   Future<bool> setStringList(String key, List<String>? value) async {
     if (value != null) {
       await SharedPreferenceAppGroup.setStringList(key, value);
@@ -183,6 +184,7 @@ class FLXGroupSharedPreference {
     return remove(key);
   }
 
+  @override
   Future<bool> setMap(String key, Map<String, dynamic>? value) async {
     if (value != null) {
       await SharedPreferenceAppGroup.setString(key, json.encode(value));
@@ -191,6 +193,7 @@ class FLXGroupSharedPreference {
     return remove(key);
   }
 
+  @override
   Future<bool> setObject(String key, dynamic value) async {
     if (value == null) return remove(key);
     final type = value.runtimeType.toString();
@@ -211,21 +214,28 @@ class FLXGroupSharedPreference {
     }
   }
 
+  @override
   Future<int?> getInt(String key) => SharedPreferenceAppGroup.getInt(key);
 
+  @override
   Future<double?> getDouble(String key) => SharedPreferenceAppGroup.getDouble(key);
 
+  @override
   Future<String?> getString(String key) => SharedPreferenceAppGroup.getString(key);
 
+  @override
   Future<bool?> getBool(String key) => SharedPreferenceAppGroup.getBool(key);
 
+  @override
   Future<List<String>?> getStringList(String key) => SharedPreferenceAppGroup.getStringList(key);
 
+  @override
   Future<Map<String, dynamic>?> getMap(String key) async {
     final str = await SharedPreferenceAppGroup.getString(key);
     return str != null && str.isNotEmpty ? json.decode(str) as Map<String, dynamic> : null;
   }
 
+  @override
   Future<dynamic> getObject(String key) async {
     dynamic val;
     val = await SharedPreferenceAppGroup.getString(key);
@@ -240,19 +250,24 @@ class FLXGroupSharedPreference {
     return val;
   }
 
+  @override
   Future<bool> remove(String key) async {
     await SharedPreferenceAppGroup.setString(key, '');
     return true;
   }
 
-  // Future<bool> clear() => throw UnimplementedError('App Group 不支持 clear 操作');
-  //
-  // Future<Set<String>> getKeys() => throw UnimplementedError('App Group 不支持 getKeys 操作');
+  @override
+  Future<bool> clear() => throw UnimplementedError('App Group 不支持 clear 操作');
 
+  @override
+  Future<Set<String>> getKeys() => throw UnimplementedError('App Group 不支持 getKeys 操作');
+
+  @override
   Future<bool> containsKey(String key) async {
     final val = await SharedPreferenceAppGroup.getString(key);
     return val != null;
   }
 
+  @override
   Future<void> reload() => Future.value();
 }

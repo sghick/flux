@@ -12,87 +12,59 @@ class FLXStorage {
   Future<void> init({String? groupId}) async {
     logD('$runtimeType Initializing...');
     memoryStorage.init();
-    return localStorage.init(groupId: groupId).then((value) {
-      logD('$runtimeType has been initialized');
-      return Future.value();
-    });
+    await localStorage.init(groupId: groupId);
+    logD('$runtimeType has been initialized');
   }
 
   Future<bool> setObject<T>(String key, T value, {FLXStorageType type = FLXStorageType.all}) {
     switch (type) {
       case FLXStorageType.local:
-        {
-          return localStorage.setObject(key, value);
-        }
+        return localStorage.setObject(key, value);
       case FLXStorageType.memory:
-        {
-          memoryStorage.setObject(key, value);
-          return Future.value(true);
-        }
+        memoryStorage.setObject(key, value);
+        return Future.value(true);
       default:
-        {
-          memoryStorage.setObject(key, value);
-          return localStorage.setObject(key, value);
-        }
+        memoryStorage.setObject(key, value);
+        return localStorage.setObject(key, value);
     }
   }
 
-  dynamic getObject<T>(String key, {FLXStorageType type = FLXStorageType.all}) {
+  Future<dynamic> getObject<T>(String key, {FLXStorageType type = FLXStorageType.all}) async {
     switch (type) {
       case FLXStorageType.local:
-        {
-          return localStorage.getObject(key);
-        }
+        return localStorage.getObject(key);
       case FLXStorageType.memory:
-        {
-          return memoryStorage.getObject(key);
-        }
+        return memoryStorage.getObject(key);
       default:
-        {
-          var obj = memoryStorage.getObject(key);
-          if (obj == null) {
-            return localStorage.getObject(key);
-          }
-          return obj;
-        }
+        var obj = memoryStorage.getObject(key);
+        if (obj != null) return obj;
+        return localStorage.getObject(key);
     }
   }
 
   Future<bool> remove(String key, {FLXStorageType type = FLXStorageType.all}) async {
     switch (type) {
       case FLXStorageType.local:
-        {
-          return localStorage.remove(key);
-        }
+        return localStorage.remove(key);
       case FLXStorageType.memory:
-        {
-          memoryStorage.remove(key);
-          return Future.value(true);
-        }
+        memoryStorage.remove(key);
+        return true;
       default:
-        {
-          memoryStorage.remove(key);
-          return localStorage.remove(key);
-        }
+        memoryStorage.remove(key);
+        return localStorage.remove(key);
     }
   }
 
   Future<bool> clear({FLXStorageType type = FLXStorageType.all}) async {
     switch (type) {
       case FLXStorageType.local:
-        {
-          return localStorage.clear();
-        }
+        return localStorage.clear();
       case FLXStorageType.memory:
-        {
-          memoryStorage.clear();
-          return true;
-        }
+        memoryStorage.clear();
+        return true;
       default:
-        {
-          memoryStorage.clear();
-          return localStorage.clear();
-        }
+        memoryStorage.clear();
+        return localStorage.clear();
     }
   }
 }
@@ -121,7 +93,7 @@ class FLXLocalStorage {
     return localStorage.init();
   }
 
-  // ──────────── Set：委托 _pref（null 处理内聚在 FLXSharedPreference）────────────
+  // ──────────── Set ────────────
 
   Future<bool> setInt(String key, int? value) => _pref.setInt(key, value);
 
@@ -137,27 +109,27 @@ class FLXLocalStorage {
 
   Future<bool> setObject<T>(String key, T? value) => _pref.setObject(key, value);
 
-  // ──────────── Get：同步调用 _pref ────────────
+  // ──────────── Get ────────────
 
-  int? getInt(String key) => _pref.getInt(key);
+  Future<int?> getInt(String key) => _pref.getInt(key);
 
-  double? getDouble(String key) => _pref.getDouble(key);
+  Future<double?> getDouble(String key) => _pref.getDouble(key);
 
-  String? getString(String key) => _pref.getString(key);
+  Future<String?> getString(String key) => _pref.getString(key);
 
-  bool? getBool(String key) => _pref.getBool(key);
+  Future<bool?> getBool(String key) => _pref.getBool(key);
 
-  List<String>? getStringList(String key) => _pref.getStringList(key);
+  Future<List<String>?> getStringList(String key) => _pref.getStringList(key);
 
-  Map<String, dynamic>? getMap(String key) => _pref.getMap(key);
+  Future<Map<String, dynamic>?> getMap(String key) => _pref.getMap(key);
 
-  dynamic getObject<T>(String key) => _pref.getObject(key);
+  Future<dynamic> getObject<T>(String key) => _pref.getObject(key);
 
-  Set<String> getKeys() => _pref.getKeys();
+  // ──────────── 其他 ────────────
 
-  bool containsKey(String key) => _pref.containsKey(key);
+  Future<Set<String>> getKeys() => _pref.getKeys();
 
-  // ──────────── 其他操作 ────────────
+  Future<bool> containsKey(String key) => _pref.containsKey(key);
 
   Future<bool> remove(String key) => _pref.remove(key);
 
@@ -225,14 +197,12 @@ class FLXMemoryCache {
     }
     _obj[key] = value;
 
-    // 加入优先级列表
     if (!_priority.contains(key)) {
       _priority.add(key);
     }
   }
 
   T? getObject<T>(String key) {
-    // 最近使用将被放在最后
     if (_priority.lastOrNull != key) {
       _priority.remove(key);
       _priority.add(key);
