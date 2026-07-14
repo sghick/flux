@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'dart:math';
-// import 'package:group_shared_preferences/group_shared_preferences.dart';
+
 import 'package:flux_core/utils/pref_utils.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../log/logger.dart';
 
@@ -104,151 +102,68 @@ FLXLocalStorage localStorage = FLXLocalStorage._();
 class FLXLocalStorage {
   static final FLXLocalStorage _instance = FLXLocalStorage._();
 
-  SharedPreferences get _sharedPreferences => sharedPref;
-  // late GroupSharedPreferences group;
+  final FLXSharedPreference _pref = FLXSharedPreference();
+  FLXGroupSharedPreference? group;
 
   FLXLocalStorage._();
 
   Future<FLXLocalStorage> init({String? groupId}) async {
+    await _pref.init();
     if (groupId != null) {
-      // group = GroupSharedPreferences(groupId);
+      group = FLXGroupSharedPreference(groupId: groupId);
+      await group!.init();
     }
-    return initSharedPref()
-        .then((value) {
-          logD('$runtimeType has been initialized');
-          return _instance;
-        })
-        .catchError((e) {
-          logE('$runtimeType initialized failed:$e');
-          return e;
-        });
+    logD('$runtimeType has been initialized');
+    return _instance;
   }
 
   Future<FLXLocalStorage> get safe async {
     return localStorage.init();
   }
 
-  Future<bool> setInt(String key, int? value) {
-    if (value != null) {
-      return _sharedPreferences.setInt(key, value);
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  // ──────────── Set：委托 _pref（null 处理内聚在 FLXSharedPreference）────────────
 
-  Future<bool> setDouble(String key, double? value) {
-    if (value != null) {
-      return _sharedPreferences.setDouble(key, value);
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  Future<bool> setInt(String key, int? value) => _pref.setInt(key, value);
 
-  Future<bool> setString(String key, String? value) {
-    if (value != null) {
-      return _sharedPreferences.setString(key, value);
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  Future<bool> setDouble(String key, double? value) => _pref.setDouble(key, value);
 
-  Future<bool> setBool(String key, bool? value) {
-    if (value != null) {
-      return _sharedPreferences.setBool(key, value);
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  Future<bool> setString(String key, String? value) => _pref.setString(key, value);
 
-  Future<bool> setStringList(String key, List<String>? value) {
-    if (value != null) {
-      return _sharedPreferences.setStringList(key, value);
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  Future<bool> setBool(String key, bool? value) => _pref.setBool(key, value);
 
-  Future<bool> setMap(String key, Map? value) {
-    if (value != null) {
-      return _sharedPreferences.setString(key, json.encode(value));
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  Future<bool> setStringList(String key, List<String>? value) => _pref.setStringList(key, value);
 
-  /// 通用设置持久化数据
-  Future<bool> setObject<T>(String key, T? value) {
-    if (value != null) {
-      String type = value.runtimeType.toString();
-      switch (type) {
-        case "String":
-          return setString(key, value as String);
-        case "int":
-          return setInt(key, value as int);
-        case "bool":
-          return setBool(key, value as bool);
-        case "double":
-          return setDouble(key, value as double);
-        case "List<String>":
-          return setStringList(key, value as List<String>);
-        case "_InternalLinkedHashMap<String, String>":
-          return setMap(key, value as Map);
-        default:
-          throw Exception("Unsupported type: ${value.runtimeType}");
-      }
-    } else {
-      return _sharedPreferences.remove(key);
-    }
-  }
+  Future<bool> setMap(String key, Map? value) => _pref.setMap(key, value as Map<String, dynamic>?);
 
-  int? getInt(String key) {
-    return _sharedPreferences.getInt(key);
-  }
+  Future<bool> setObject<T>(String key, T? value) => _pref.setObject(key, value);
 
-  double? getDouble(String key) {
-    return _sharedPreferences.getDouble(key);
-  }
+  // ──────────── Get：同步调用 _pref ────────────
 
-  String? getString(String key) {
-    return _sharedPreferences.getString(key);
-  }
+  int? getInt(String key) => _pref.getInt(key);
 
-  bool? getBool(String key) {
-    return _sharedPreferences.getBool(key);
-  }
+  double? getDouble(String key) => _pref.getDouble(key);
 
-  List<String>? getStringList(String key) {
-    return _sharedPreferences.getStringList(key);
-  }
+  String? getString(String key) => _pref.getString(key);
 
-  Map<String, dynamic>? getMap(String key) {
-    String jsonStr = _sharedPreferences.getString(key) ?? "";
-    return jsonStr.isNotEmpty ? json.decode(jsonStr) : null;
-  }
+  bool? getBool(String key) => _pref.getBool(key);
 
-  dynamic getObject<T>(String key) {
-    return _sharedPreferences.get(key);
-  }
+  List<String>? getStringList(String key) => _pref.getStringList(key);
 
-  Set<String> getKeys() {
-    return _sharedPreferences.getKeys();
-  }
+  Map<String, dynamic>? getMap(String key) => _pref.getMap(key);
 
-  bool containsKey(String key) {
-    return _sharedPreferences.containsKey(key);
-  }
+  dynamic getObject<T>(String key) => _pref.getObject(key);
 
-  Future<bool> remove(String key) async {
-    return _sharedPreferences.remove(key);
-  }
+  Set<String> getKeys() => _pref.getKeys();
 
-  Future<bool> clear() async {
-    return _sharedPreferences.clear();
-  }
+  bool containsKey(String key) => _pref.containsKey(key);
 
-  Future<void> reload() async {
-    return _sharedPreferences.reload();
-  }
+  // ──────────── 其他操作 ────────────
+
+  Future<bool> remove(String key) => _pref.remove(key);
+
+  Future<bool> clear() => _pref.clear();
+
+  Future<void> reload() => _pref.reload();
 }
 
 FLXMemoryStorage memoryStorage = FLXMemoryStorage();
@@ -284,7 +199,7 @@ class FLXMemoryStorage {
   }
 }
 
-class CBMemoryCache {
+class FLXMemoryCache {
   final Map<String, dynamic> _obj = {};
   final List<String> _priority = [];
 
@@ -294,7 +209,7 @@ class CBMemoryCache {
   /// 自动清除缓存时,每次清除的个数
   final int unit;
 
-  CBMemoryCache({this.limit = 100, this.unit = 10});
+  FLXMemoryCache({this.limit = 100, this.unit = 10});
 
   void addAll(Map<String, dynamic> obj) {
     if (limit < _obj.length + obj.length) {
