@@ -24,8 +24,6 @@ abstract class FLXSharedPreferenceInterface {
   Future<dynamic> getObject(String key);
 
   Future<bool> remove(String key);
-  Future<bool> clear();
-  Future<Set<String>> getKeys();
   Future<bool> containsKey(String key);
   Future<void> reload();
 }
@@ -111,10 +109,8 @@ class FLXSharedPreference extends FLXSharedPreferenceInterface {
   @override
   Future<bool> remove(String key) => _pref.remove(key);
 
-  @override
   Future<bool> clear() => _pref.clear();
 
-  @override
   Future<Set<String>> getKeys() => Future.value(_pref.getKeys());
 
   @override
@@ -255,12 +251,6 @@ class FLXGroupSharedPreference extends FLXSharedPreferenceInterface {
     await SharedPreferenceAppGroup.setString(key, '');
     return true;
   }
-
-  @override
-  Future<bool> clear() => throw UnimplementedError('App Group 不支持 clear 操作');
-
-  @override
-  Future<Set<String>> getKeys() => throw UnimplementedError('App Group 不支持 getKeys 操作');
 
   @override
   Future<bool> containsKey(String key) async {
