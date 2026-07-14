@@ -15,21 +15,31 @@ abstract class FLXSharedPreferenceInterface {
   Future<bool> setMap(String key, Map<String, dynamic>? value);
   Future<bool> setObject(String key, dynamic value);
 
-  Future<int?> getInt(String key);
-  Future<double?> getDouble(String key);
-  Future<String?> getString(String key);
-  Future<bool?> getBool(String key);
-  Future<List<String>?> getStringList(String key);
-  Future<Map<String, dynamic>?> getMap(String key);
-  Future<dynamic> getObject(String key);
+  Future<int?> getAsyncInt(String key);
+  Future<double?> getAsyncDouble(String key);
+  Future<String?> getAsyncString(String key);
+  Future<bool?> getAsyncBool(String key);
+  Future<List<String>?> getAsyncStringList(String key);
+  Future<Map<String, dynamic>?> getAsyncMap(String key);
+  Future<dynamic> getAsyncObject(String key);
 
   Future<bool> remove(String key);
   Future<bool> containsKey(String key);
   Future<void> reload();
 }
 
+abstract class FLXSharedPreferenceSyncGetterInterface {
+  int? getInt(String key);
+  double? getDouble(String key);
+  String? getString(String key);
+  bool? getBool(String key);
+  List<String>? getStringList(String key);
+  Map<String, dynamic>? getMap(String key);
+  dynamic getObject(String key);
+}
+
 /// 封装 [SharedPreferences] 插件
-class FLXSharedPreference extends FLXSharedPreferenceInterface {
+class FLXSharedPreference extends FLXSharedPreferenceInterface implements FLXSharedPreferenceSyncGetterInterface {
   late SharedPreferences _pref;
 
   @override
@@ -83,28 +93,52 @@ class FLXSharedPreference extends FLXSharedPreferenceInterface {
   }
 
   @override
-  Future<int?> getInt(String key) => Future.value(_pref.getInt(key));
+  Future<int?> getAsyncInt(String key) => Future.value(_pref.getInt(key));
 
   @override
-  Future<double?> getDouble(String key) => Future.value(_pref.getDouble(key));
+  Future<double?> getAsyncDouble(String key) => Future.value(_pref.getDouble(key));
 
   @override
-  Future<String?> getString(String key) => Future.value(_pref.getString(key));
+  Future<String?> getAsyncString(String key) => Future.value(_pref.getString(key));
 
   @override
-  Future<bool?> getBool(String key) => Future.value(_pref.getBool(key));
+  Future<bool?> getAsyncBool(String key) => Future.value(_pref.getBool(key));
 
   @override
-  Future<List<String>?> getStringList(String key) => Future.value(_pref.getStringList(key));
+  Future<List<String>?> getAsyncStringList(String key) => Future.value(_pref.getStringList(key));
 
   @override
-  Future<Map<String, dynamic>?> getMap(String key) async {
+  Future<Map<String, dynamic>?> getAsyncMap(String key) async {
     final str = _pref.getString(key);
     return str != null && str.isNotEmpty ? json.decode(str) as Map<String, dynamic> : null;
   }
 
   @override
-  Future<dynamic> getObject(String key) => Future.value(_pref.get(key));
+  Future<dynamic> getAsyncObject(String key) => Future.value(_pref.get(key));
+
+  @override
+  int? getInt(String key) => _pref.getInt(key);
+
+  @override
+  double? getDouble(String key) => _pref.getDouble(key);
+
+  @override
+  String? getString(String key) => _pref.getString(key);
+
+  @override
+  bool? getBool(String key) => _pref.getBool(key);
+
+  @override
+  List<String>? getStringList(String key) => _pref.getStringList(key);
+
+  @override
+  Map<String, dynamic>? getMap(String key) {
+    final str = _pref.getString(key);
+    return str != null && str.isNotEmpty ? json.decode(str) as Map<String, dynamic> : null;
+  }
+
+  @override
+  dynamic getObject(String key) => _pref.get(key);
 
   @override
   Future<bool> remove(String key) => _pref.remove(key);
@@ -219,34 +253,34 @@ class FLXGroupSharedPreference extends FLXSharedPreferenceInterface {
   }
 
   @override
-  Future<int?> getInt(String key) =>
+  Future<int?> getAsyncInt(String key) =>
       _initialized ? SharedPreferenceAppGroup.getInt(key) : Future.value(null);
 
   @override
-  Future<double?> getDouble(String key) =>
+  Future<double?> getAsyncDouble(String key) =>
       _initialized ? SharedPreferenceAppGroup.getDouble(key) : Future.value(null);
 
   @override
-  Future<String?> getString(String key) =>
+  Future<String?> getAsyncString(String key) =>
       _initialized ? SharedPreferenceAppGroup.getString(key) : Future.value(null);
 
   @override
-  Future<bool?> getBool(String key) =>
+  Future<bool?> getAsyncBool(String key) =>
       _initialized ? SharedPreferenceAppGroup.getBool(key) : Future.value(null);
 
   @override
-  Future<List<String>?> getStringList(String key) =>
+  Future<List<String>?> getAsyncStringList(String key) =>
       _initialized ? SharedPreferenceAppGroup.getStringList(key) : Future.value(null);
 
   @override
-  Future<Map<String, dynamic>?> getMap(String key) async {
+  Future<Map<String, dynamic>?> getAsyncMap(String key) async {
     if (!_initialized) return null;
     final str = await SharedPreferenceAppGroup.getString(key);
     return str != null && str.isNotEmpty ? json.decode(str) as Map<String, dynamic> : null;
   }
 
   @override
-  Future<dynamic> getObject(String key) async {
+  Future<dynamic> getAsyncObject(String key) async {
     if (!_initialized) return null;
     dynamic val;
     val = await SharedPreferenceAppGroup.getString(key);

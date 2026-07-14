@@ -32,13 +32,13 @@ class FLXStorage {
   Future<dynamic> getObject<T>(String key, {FLXStorageType type = FLXStorageType.all}) async {
     switch (type) {
       case FLXStorageType.local:
-        return localStorage.pref.getObject(key);
+        return localStorage.pref.getAsyncObject(key);
       case FLXStorageType.memory:
         return memoryStorage.getObject(key);
       default:
         var obj = memoryStorage.getObject(key);
         if (obj != null) return obj;
-        return localStorage.pref.getObject(key);
+        return localStorage.pref.getAsyncObject(key);
     }
   }
 
