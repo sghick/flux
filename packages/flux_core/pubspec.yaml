@@ -1,6 +1,6 @@
 name: flux_core
 description: "Flux Framework Core — A lightweight Flutter framework core with abstract UI interfaces."
-version: 2.0.0
+version: 2.0.1
 publish_to: 'none'
 
 environment:
@@ -18,6 +18,7 @@ dependencies:
 
   # Storage
   shared_preferences: ^2.5.3
+  shared_preference_app_group: ^2.1.0
 
   # Logging
   logger: ^2.6.1
