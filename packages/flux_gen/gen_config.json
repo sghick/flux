@@ -5,7 +5,8 @@
   "commonHeader": "CommonHeader",
   "api_conf": "api_conf",
   "ignore_api_conf_files": [
-    "admin.api"
+    "webhook_apple.api",
+    "admin_*.api"
   ],
   "src_dir": "/services/api_conf",
   "dst_dir": "/custom/scripts"

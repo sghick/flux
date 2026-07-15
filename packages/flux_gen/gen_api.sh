@@ -22,15 +22,16 @@ print(f'IGNORE_FILES=({' '.join(ignore_files)})')
 # 1. 复制 .api 文件
 cp -rf "$SRC_DIR" "$DST_DIR/"
 
-# 2. 根据 gen_config.json 中的 ignore_api_conf_files 删除不需要的文件
+# 2. 根据 gen_config.json 中的 ignore_api_conf_files 删除不需要的文件（支持通配符如 admin_*.api）
 conf_dir="$DST_DIR/$API_CONF"
-for fname in "${IGNORE_FILES[@]}"; do
-    path="$conf_dir/$fname"
-    if [ -f "$path" ]; then
-        rm -f "$path"
-        echo "[gen_api.sh] 已删除忽略文件: $fname"
-    fi
+shopt -s nullglob 2>/dev/null
+for pattern in "${IGNORE_FILES[@]}"; do
+    for file in "$conf_dir"/$pattern; do
+        rm -f "$file"
+        echo "[gen_api.sh] 已删除忽略文件: $(basename "$file")"
+    done
 done
+shopt -u nullglob 2>/dev/null
 
 # 3. 生成 Dart 代码
 cd "$SCRIPT_DIR"

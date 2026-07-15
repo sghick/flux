@@ -18,6 +18,7 @@ import re
 import sys
 import json
 import argparse
+import fnmatch
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Set
 from pathlib import Path
@@ -1398,11 +1399,11 @@ class ApiGenerator:
 
         # 第一阶段：解析所有 API 文件
         all_api_files: List[ApiFile] = []
-        ignore_set = set(self.config.ignore_api_conf_files)
+        ignore_patterns = self.config.ignore_api_conf_files
         for api_file_path in sorted(input_path.glob('*.api')):
             if api_file_path.name == 'main.api':
                 continue
-            if api_file_path.name in ignore_set:
+            if any(fnmatch.fnmatch(api_file_path.name, p) for p in ignore_patterns):
                 print(f"跳过(ignore_api_conf_files): {api_file_path.name}")
                 continue
             api_file = self.parser.parse_file(str(api_file_path))
