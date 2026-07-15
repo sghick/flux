@@ -4,17 +4,17 @@ typedef FLXUILayoutWidgetBuilder = Widget Function();
 typedef FLXUILayoutListWidgetBuilder<T> = Widget Function(T child);
 
 extension FLXUILayoutWidgetExt on Widget? {
-  Widget lkBuild(bool condition, FLXUILayoutWidgetBuilder builder) =>
+  Widget flxBuild(bool condition, FLXUILayoutWidgetBuilder builder) =>
       condition ? builder() : this!;
 
-  Widget lkPadding(EdgeInsets? padding) => lkBuild(
+  Widget flxPadding(EdgeInsets? padding) => flxBuild(
       padding != null,
       () => Padding(
             padding: padding ?? EdgeInsets.zero,
             child: this,
           ));
 
-  Widget lkSafeArea({
+  Widget flxSafeArea({
     bool? left,
     bool? top,
     bool? right,
@@ -22,7 +22,7 @@ extension FLXUILayoutWidgetExt on Widget? {
     EdgeInsets? minimum,
     bool enable = true,
   }) =>
-      lkBuild(
+      flxBuild(
           enable,
           () => SafeArea(
                 left: left ?? true,
@@ -35,10 +35,10 @@ extension FLXUILayoutWidgetExt on Widget? {
 }
 
 extension FLXUILayoutListWidgetExt on List<Widget>? {
-  List<Widget> lkAddAll(bool condition, FLXUILayoutListWidgetBuilder builder) =>
+  List<Widget> flxAddAll(bool condition, FLXUILayoutListWidgetBuilder builder) =>
       condition ? this!.map((e) => builder(e)).toList() : this!;
 
-  List<Widget> lkPaddingAll(EdgeInsets? padding) => lkAddAll(
+  List<Widget> flxPaddingAll(EdgeInsets? padding) => flxAddAll(
       padding != null,
       (child) => Padding(
             padding: padding ?? EdgeInsets.zero,
