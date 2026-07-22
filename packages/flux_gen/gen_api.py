@@ -1033,6 +1033,16 @@ class ApiCodeGenerator:
         """获取带前缀/后缀的结构体名"""
         return f"{self.config.model_prefix}{name}{self.config.model_suffix}"
 
+    def _has_generated_models(self, api_file: ApiFile) -> bool:
+        """检查模块是否有会被 ModelGenerator 真正生成的结构体（排除 Req 和空结构体）"""
+        for struct_name, struct in api_file.structs.items():
+            if struct_name.endswith('Req') and self.config.skip_req_models:
+                continue
+            if struct.is_empty() and self.config.skip_empty_structs:
+                continue
+            return True
+        return False
+
     def generate(self, api_file: ApiFile, generated_models: Set[str], all_api_files: List[ApiFile] = None) -> str:
         """生成 API 代码"""
         # 构建类型映射
@@ -1044,7 +1054,9 @@ class ApiCodeGenerator:
         lines.append("import 'package:flux_core/flux_core.dart';")
         lines.append("import './apis.dart';")
         lines.append("import '../client/api_options.dart';")
-        lines.append(f"import '../models/json/{api_file.module_name}_model.dart';")
+        # 仅当模块有真正被生成的 model 时才导入，否则跳过（如 device.api 全 Req，无 model 文件）
+        if self._has_generated_models(api_file):
+            lines.append(f"import '../models/json/{api_file.module_name}_model.dart';")
 
         # 收集需要导入的其他模块类型
         external_types = self._collect_external_types(api_file, generated_models)
