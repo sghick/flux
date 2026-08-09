@@ -5,18 +5,18 @@ import 'package:get/get.dart';
 
 import '{name}_logic.dart';
 
-class {prefix}{Name}Page extends StatefulWidget {
-  const {prefix}{Name}Page({super.key});
+class {PageClass} extends StatefulWidget {
+  const {PageClass}({super.key});
 
   @override
-  State<{prefix}{Name}Page> createState() => _{prefix}{Name}PageState();
+  State<{PageClass}> createState() => _{PageClass}State();
 }
 
-class _{prefix}{Name}PageState extends State<{prefix}{Name}Page> with {prefix}{Name}LogicMixin {
+class _{PageClass}State extends State<{PageClass}> with {LogicClass}Mixin {
   @override
   Widget build(BuildContext context) {
-    return {prefix}Scaffold(
-      backgroundColor: {prefix}ColorStyles.surface,
+    return {Prefix}Scaffold(
+      backgroundColor: {Prefix}ColorStyles.surface,
       body: Container(),
     );
   }

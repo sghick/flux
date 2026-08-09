@@ -183,6 +183,8 @@ class GeneratorConfig:
         self.use_null_safety = config.get('use_null_safety', True)
         # 忽略文件列表
         self.ignore_api_conf_files: List[str] = config.get('ignore_api_conf_files', [])
+        # 需要跳过自动生成的 handler 名称集合（如 FileUpload 需手写 multipart 处理）
+        self.skip_gen_api_handlers: List[str] = config.get('skip_gen_api_handlers', [])
         self.type_mapping = {
             'string': 'String',
             'int': 'int',
@@ -1017,8 +1019,10 @@ class ModelGenerator:
 class ApiCodeGenerator:
     """Dart API 代码生成器"""
 
-    def __init__(self, config: GeneratorConfig):
+    def __init__(self, config: GeneratorConfig, skip_handlers: Optional[Set[str]] = None):
         self.config = config
+        # 需要跳过自动生成的 handler 名称集合（如 FileUpload 需手动管理 multipart）
+        self.skip_handlers: Set[str] = skip_handlers or set()
         # 类型到模块的映射（将在生成时构建）
         self.type_to_module: Dict[str, str] = {}
 
@@ -1073,6 +1077,10 @@ class ApiCodeGenerator:
 
         for service in api_file.services:
             for endpoint in service.endpoints:
+                # 跳过手动维护的 handler（如 FileUpload 需手写 multipart 处理）
+                if endpoint.handler in self.skip_handlers:
+                    print(f"  [跳过] handler {endpoint.handler}（手动维护，不自动生成）")
+                    continue
                 method_code = self._generate_endpoint_method(endpoint, api_file, generated_models)
                 lines.append(method_code)
                 lines.append("")
@@ -1379,7 +1387,7 @@ class ApiGenerator:
         self.force = force
         self.parser = ApiParser(config)
         self.model_generator = ModelGenerator(config)
-        self.api_generator = ApiCodeGenerator(config)
+        self.api_generator = ApiCodeGenerator(config, skip_handlers=set(config.skip_gen_api_handlers))
         self.apis_constant_generator = ApisConstantGenerator(config)
 
     def run(self):
@@ -1453,17 +1461,27 @@ class ApiGenerator:
                 print(f"  [跳过] {model_file.name} (已存在)")
 
             # 生成 API
-            api_code = self.api_generator.generate(api_file, generated_structs, all_api_files)
-            api_file_path_out = api_output / f"{api_file.module_name}_api.dart"
-
-            if self._should_write_file(api_file_path_out):
-                with open(api_file_path_out, 'w', encoding='utf-8') as f:
-                    f.write(api_code)
-                generated_files.append(f"[API]   {api_file_path_out.name}")
-                print(f"  [生成] {api_file_path_out.name}")
+            # 如果该文件所有 handler 都在跳过名单中，则跳过整个文件
+            all_handlers_skipped = all(
+                endpoint.handler in self.api_generator.skip_handlers
+                for service in api_file.services
+                for endpoint in service.endpoints
+            )
+            if all_handlers_skipped:
+                skipped_files.append(f"[API]   {api_file.module_name}_api.dart")
+                print(f"  [跳过] {api_file.module_name}_api.dart (手动维护)")
             else:
-                skipped_files.append(f"[API]   {api_file_path_out.name}")
-                print(f"  [跳过] {api_file_path_out.name} (已存在)")
+                api_code = self.api_generator.generate(api_file, generated_structs, all_api_files)
+                api_file_path_out = api_output / f"{api_file.module_name}_api.dart"
+
+                if self._should_write_file(api_file_path_out):
+                    with open(api_file_path_out, 'w', encoding='utf-8') as f:
+                        f.write(api_code)
+                    generated_files.append(f"[API]   {api_file_path_out.name}")
+                    print(f"  [生成] {api_file_path_out.name}")
+                else:
+                    skipped_files.append(f"[API]   {api_file_path_out.name}")
+                    print(f"  [跳过] {api_file_path_out.name} (已存在)")
 
             # 收集 API 常量
             for service in api_file.services:

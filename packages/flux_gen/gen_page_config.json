@@ -1,21 +1,15 @@
 {
-  "main_tab": "/main_tab",
   "pages": [
-    "splash /auth/splash",
-    "onboarding /auth/onboarding",
-    "welcome /auth/welcome",
-    "login /auth/login",
+    "main_tab /main_tab @arguments({MainTab? tab}) @navigator(offAllNamed) @transition(fadeIn)",
+    "splash /auth/splash @navigator(offAllNamed)",
+    "onboarding /auth/onboarding @navigator(offAllNamed)",
+    "login /auth/login @navigator(offAllNamed)",
 
     "home /home",
-    "tab1 /tab1",
-    "tab2 /tab2",
+
     "me /me",
-    "web /others/web"
-  ],
-  "tabOrder": [
-    "home",
-    "tab1",
-    "tab2",
-    "me"
+    "about /me/about",
+
+    "web /others/web @arguments(String url, {String title = ''})"
   ]
 }

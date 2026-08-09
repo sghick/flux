@@ -6,8 +6,13 @@
   "api_conf": "api_conf",
   "ignore_api_conf_files": [
     "webhook_apple.api",
-    "admin_*.api"
+    "admin_*.api",
+    "short_link_client.api",
+    "short_link_public.api"
   ],
-  "src_dir": "/services/api_conf",
-  "dst_dir": "/custom/scripts"
+  "skip_gen_api_handlers": [
+    "FileUpload"
+  ],
+  "src_dir": "/Users/api_conf",
+  "dst_dir": "/Users/scripts"
 }

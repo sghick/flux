@@ -1,1081 +1,895 @@
 #!/usr/bin/env python3
 """
-页面配置生成器
-根据配置自动生成页面文件、路由配置和导航方法
+gen_pages.py — Bondflow 页面/路由代码生成器
+
+用法:
+    python3 gen_pages.py generate          # 全流程: pages + routes
+    python3 gen_pages.py pages             # 只补缺 page 文件
+    python3 gen_pages.py routes            # 全量覆盖 .g.dart 路由文件
+    python3 gen_pages.py init              # 创建缺失的非 .g.dart 路由文件
+
+产物:
+    lib/routes/ 目录:
+        *.g.dart      — 每次 routes 命令全量覆盖, 100% 来自 gen_page_config.json
+        *.dart (非.g)  — 只在缺失时创建, 之后手动维护
 """
+
 import json
 import os
 import re
 import sys
-from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-# 项目根目录
-PROJECT_ROOT = Path(__file__).parent.parent
-SCRIPTS_DIR = Path(__file__).parent
-CONFIG_FILE = SCRIPTS_DIR / "gen_page_config.json"
-GEN_CONFIG_FILE = SCRIPTS_DIR / "gen_config.json"
-TEMPLATES_DIR = SCRIPTS_DIR / "templates"
-PAGES_DIR = PROJECT_ROOT / "lib" / "pages"
+# ============================================================
+# 路径配置
+# ============================================================
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATE_DIR = os.path.join(SCRIPT_DIR, "templates")
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "gen_page_config.json")
+GEN_CONFIG_FILE = os.path.join(SCRIPT_DIR, "gen_config.json")
+ROUTES_DIR = os.path.join(SCRIPT_DIR, "..", "lib", "routes")
+PAGES_DIR = os.path.join(SCRIPT_DIR, "..", "lib", "pages")
 
-# 路由文件
-ROUTE_PATH_FILE = PROJECT_ROOT / "lib" / "routes" / "route_config.path.dart"
-ROUTE_PAGES_FILE = PROJECT_ROOT / "lib" / "routes" / "route_config.pages.dart"
-ROUTE_NAVIGATOR_FILE = PROJECT_ROOT / "lib" / "routes" / "route_navigator.dart"
-MAIN_TAB_LOGIC_FILE = PROJECT_ROOT / "lib" / "pages" / "main_tab" / "main_tab_logic.dart"
-PAGE_PARAMS_FILE = PROJECT_ROOT / "lib" / "routes" / "page_params.dart"
+# ============================================================
+# 基础工具函数
+# ============================================================
 
-def load_package_name():
-    """从 pubspec.yaml 获取包名"""
-    pubspec = PROJECT_ROOT / "pubspec.yaml"
-    if pubspec.exists():
-        content = pubspec.read_text(encoding="utf-8")
-        match = re.search(r'^name:\s*(.+)$', content, re.MULTILINE)
-        if match:
-            return match.group(1).strip()
-    return "myapp"
 
-def load_gen_config():
-    """加载生成器配置文件"""
-    if GEN_CONFIG_FILE.exists():
-        try:
-            with open(GEN_CONFIG_FILE, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                prefix = config.get("prefix", "FLX")
-                if not prefix or not prefix.strip():
-                    print("警告: 配置文件中的 prefix 为空，使用默认值 'FLX'")
-                    return {"prefix": "FLX"}
-                return config
-        except json.JSONDecodeError as e:
-            print(f"警告: 配置文件格式错误: {e}，使用默认配置")
-            return {"prefix": "FLX"}
-        except Exception as e:
-            print(f"警告: 读取配置文件失败: {e}，使用默认配置")
-            return {"prefix": "FLX"}
+def read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def write_text(path: str, content: str):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"  ✓ {path}")
+
+
+def snake_to_camel(s: str, first_upper: bool = True) -> str:
+    """snake_case → camelCase / PascalCase"""
+    parts = s.split("_")
+    result = parts[0].lower()
+    if first_upper:
+        result = result[0].upper() + result[1:]
+    result += "".join(p.capitalize() for p in parts[1:])
+    return result
+
+
+def snake_to_pascal(s: str) -> str:
+    return snake_to_camel(s, first_upper=True)
+
+
+def page_name_to_page_class(name: str, prefix: str) -> str:
+    """页面名 → Page 类名, 如 splash → FLXSplashPage"""
+    return prefix + snake_to_pascal(name) + "Page"
+
+
+def page_name_to_logic_class(name: str, prefix: str) -> str:
+    """页面名 → Logic 类名, 如 splash → FLXSplashLogic"""
+    return prefix + snake_to_pascal(name) + "Logic"
+
+
+def page_name_to_file(name: str) -> str:
+    """页面名 → 文件名前缀, 如 splash → splash"""
+    return name
+
+
+def page_name_to_dir(name: str, page_path: str) -> str:
+    """从 page path 提取文件系统中的目录位置.
+
+    规则:
+      - 多段路径: 直接使用路径, 如 /auth/splash → auth/splash
+      - 单段路径: 追加 page name, 如 /home → home/home
+    """
+    stripped = page_path.lstrip("/")
+    if "/" in stripped:
+        return stripped
+    return f"{stripped}/{name}"
+
+
+def page_name_to_page_import_dir(name: str, page_path: str) -> str:
+    """页面 import 路径, 如 auth/splash"""
+    return page_name_to_dir(name, page_path)
+
+
+def page_name_to_page_import(name: str, page_path: str, prefix: str) -> str:
+    """页面 import 语句, 如 import 'package:bondflow/pages/auth/splash/splash_page.dart';
+
+    路径模式:
+      - 多段路径: pages/{path_stripped}/{page_name}_page.dart
+        如: splash /auth/splash → pages/auth/splash/splash_page.dart
+      - 单段路径: pages/{path_stripped}/{page_name}/{page_name}_page.dart
+        如: home /home → pages/home/home/home_page.dart
+    """
+    file_name = page_name_to_file(name)
+    dir_path = page_path.lstrip("/")
+    if "/" in dir_path:
+        import_dir = dir_path
     else:
-        print("提示: 配置文件不存在，使用默认前缀 'FLX'")
-        return {"prefix": "FLX"}
-
-# 全局配置
-GEN_CONFIG = load_gen_config()
-CLASS_PREFIX = GEN_CONFIG.get("prefix", "FLX")
-
-def load_config_package_name():
-    config_package = GEN_CONFIG.get("package", "None")
-    # 如果配置是 None，则使用项目的 package
-    if config_package == "None":
-        return load_package_name()
-    else:
-        return config_package
-
-# 全局包名
-PACKAGE_NAME = load_config_package_name()
-
-def apply_template_all_placeholder(content, prefix):
-    content = apply_package_placeholder(content)
-    return apply_prefix_placeholder(content, prefix)
-
-def apply_prefix_placeholder(content, prefix):
-    """替换模板中的 {prefix} 占位符"""
-    return content.replace("{prefix}", prefix)
-
-def apply_package_placeholder(content):
-    """替换模板中的 {package} 占位符"""
-    return content.replace("{package}", PACKAGE_NAME)
+        import_dir = f"{dir_path}/{file_name}"
+    return f"import 'package:{PACKAGE}/pages/{import_dir}/{file_name}_page.dart';"
 
 
-def load_config():
-    """加载配置文件"""
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+def class_name_to_page_name(class_name: str, prefix: str) -> str:
+    """FLXSplashPage → splash"""
+    if class_name.startswith(prefix):
+        class_name = class_name[len(prefix):]
+    if class_name.endswith("Page"):
+        class_name = class_name[:-4]
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
 
 
-def parse_pages(pages_str_list):
-    """解析页面配置，支持 @arguments(...) 后缀"""
-    pages = []
-    for item in pages_str_list:
-        item = item.strip()
-        # 分离 @arguments 部分
-        arguments_str = None
-        if "@arguments" in item:
-            idx = item.index("@arguments")
-            arguments_str = item[idx + len("@arguments"):].strip()
-            # 去掉外层括号
-            if arguments_str.startswith("(") and arguments_str.endswith(")"):
-                arguments_str = arguments_str[1:-1].strip()
-            item = item[:idx].strip()
-
-        parts = item.split()
-        if len(parts) >= 2:
-            page = {"name": parts[0], "path": parts[1]}
-            if arguments_str:
-                page["arguments"] = arguments_str
-            pages.append(page)
-    return pages
+# ============================================================
+# Config 解析
+# ============================================================
 
 
-def parse_arguments_list(arguments_str):
-    """解析参数字符串，如 'String url, {String title = ''}'
-    返回 list[dict]，每个 dict 包含 type, name, default, isNamed, isRequired, isOptional"""
-    if not arguments_str:
-        return []
+class PageEntry:
+    """单个页面的配置条目"""
+    def __init__(self, name: str, path: str, navigator: str = "toNamed",
+                 arguments: Optional[str] = None,
+                 transition: str = "rightToLeft"):
+        self.name = name
+        self.path = path
+        self.navigator = navigator  # toNamed / offAllNamed
+        self.arguments = arguments  # raw arg string like "int userId, {String name}"
+        self.transition = transition
 
-    # 按顶层逗号分割（处理嵌套的 {} [] <>）
-    parts = []
-    depth = 0
-    current = ""
-    for ch in arguments_str:
-        if ch in "{[(<":
-            depth += 1
-        elif ch in "}])>":
-            depth -= 1
-        elif ch == "," and depth == 0:
-            parts.append(current.strip())
-            current = ""
-            continue
-        current += ch
-    if current.strip():
-        parts.append(current.strip())
+    def page_class(self, prefix: str) -> str:
+        return page_name_to_page_class(self.name, prefix)
 
-    params = []
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
+    def logic_class(self, prefix: str) -> str:
+        return page_name_to_logic_class(self.name, prefix)
 
-        if part.startswith("{") or part.startswith("["):
-            # 递归处理嵌套的参数组 {Type name = default, ...} 或 [Type name = default, ...]
-            inner = part[1:-1].strip()
-            nested = parse_arguments_list(inner)
-            for p in nested:
-                p["isNamed"] = part.startswith("{")
-                # 如果参数本身标记了 required，保留它
-                if not p.get("hasRequired", False):
-                    p["isRequired"] = False
-                p["isOptional"] = True
-            params.extend(nested)
-            continue
+    def file_name(self) -> str:
+        return page_name_to_file(self.name)
 
-        # 解析单参数: [required] Type name = default
-        # 用深度追踪找 type 和 name 的分界（处理 Map<String, String>? 这种内部有空格的情况）
-        has_required = False
-        working_part = part
-        if part.startswith("required "):
-            has_required = True
-            working_part = part[len("required "):]
+    def dir_path(self) -> str:
+        return page_name_to_dir(self.name, self.path)
 
-        depth_t = 0
-        type_end = -1
-        for i, ch in enumerate(working_part):
-            if ch == '<':
-                depth_t += 1
-            elif ch == '>':
-                depth_t -= 1
-            elif ch.isspace() and depth_t == 0:
-                type_end = i
-                break
-        if type_end > 0:
-            type_str = working_part[:type_end].strip()
-            rest = working_part[type_end:].strip()
-            # 解析 name 和 default: name = default
-            eq_idx = rest.find('=')
-            if eq_idx >= 0:
-                name_str = rest[:eq_idx].strip()
-                default_str = rest[eq_idx + 1:].strip()
+    def import_statement(self, prefix: str) -> str:
+        return page_name_to_page_import(self.name, self.path, prefix)
+
+    def route_const(self) -> str:
+        return "path" + snake_to_pascal(self.name)
+
+    def navigator_method(self) -> str:
+        """_getToNamed / _getOffAllNamed"""
+        if self.navigator == "offAllNamed":
+            return "_getOffAllNamed"
+        return "_getToNamed"
+
+    def navigator_method_name(self) -> str:
+        """goHomePage"""
+        return "go" + snake_to_pascal(self.name) + "Page"
+
+    def parse_arguments(self) -> List[Tuple[str, str, str, Optional[str]]]:
+        """
+        解析 arguments 字符串, 返回 [(name, type, default, modifier), ...]
+        modifier: "required" / "named" / "positional"
+
+        支持两种格式:
+          @arguments(Type name)                          → 单个位置参数
+          @arguments(Type name, {Type name = default})    → 混合
+          @arguments({required Type name, Type name})     → 整个 {} 包裹 = 全部 named
+        """
+        if not self.arguments:
+            return []
+        raw = self.arguments.strip()
+        if not raw:
+            return []
+
+        # 处理整个参数的 {} 包裹 (例如 @arguments({required bool isAutoIn}))
+        # 这种格式表示内部所有参数都是 named
+        all_named = False
+        if raw.startswith("{") and raw.endswith("}"):
+            all_named = True
+            raw = raw[1:-1].strip()
+
+        params = []
+        parts = re.split(r",\s*", raw)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            named = all_named  # 继承外层标记
+            required = False
+            default = None
+
+            # 非全局 named 时, 逐个参数可能自带 {}
+            if not all_named and part.startswith("{") and part.endswith("}"):
+                named = True
+                part = part[1:-1].strip()
+
+            # 提取 required (前缀, 仅 named 参数)
+            if part.startswith("required "):
+                required = True
+                part = part[len("required "):].strip()
+
+            # 提取默认值
+            eq_match = re.match(r"^(.+?)\s*=\s*(.+)$", part)
+            if eq_match:
+                part = eq_match.group(1).strip()
+                default = eq_match.group(2).strip()
+                named = True  # 有默认值 → 必然是 named
+
+            # 分离 type 和 name
+            tokens = part.rsplit(None, 1)
+            if len(tokens) == 2:
+                ptype, pname = tokens
             else:
-                name_str = rest
-                default_str = None
-            params.append({
-                "type": type_str,
-                "name": name_str,
-                "default": default_str,
-                "isNamed": False,
-                "isRequired": True,
-                "isOptional": False,
-                "hasRequired": has_required,
-            })
+                ptype = "dynamic"
+                pname = tokens[0]
 
-    return params
-
-
-def build_navigator_sig_from_args(arguments_str):
-    """根据参数字符串构建导航方法签名部分，如 '(String url, {String title = '\\''})'"""
-    params = parse_arguments_list(arguments_str)
-    if not params:
-        return "()"
-
-    required = [p for p in params if p["isRequired"] and not p["isNamed"]]
-    named = [p for p in params if p["isNamed"]]
-    optional_pos = [p for p in params if not p["isRequired"] and not p["isNamed"]]
-
-    sig_parts = []
-    for p in required:
-        sig_parts.append(f'{p["type"]} {p["name"]}')
-
-    if named:
-        named_parts = []
-        for p in named:
-            prefix = "required " if p.get("hasRequired", False) else ""
-            if p["default"] is not None:
-                named_parts.append(f'{prefix}{p["type"]} {p["name"]} = {p["default"]}')
+            # 确定 modifier
+            if required:
+                modifier = "required"
+            elif named or default is not None:
+                modifier = "named"
             else:
-                named_parts.append(f'{prefix}{p["type"]} {p["name"]}')
-        sig_parts.append("{" + ", ".join(named_parts) + "}")
-
-    if optional_pos:
-        pos_parts = []
-        for p in optional_pos:
-            if p["default"] is not None:
-                pos_parts.append(f'{p["type"]} {p["name"]} = {p["default"]}')
-            else:
-                pos_parts.append(f'{p["type"]} {p["name"]}')
-        sig_parts.append("[" + ", ".join(pos_parts) + "]")
-
-    return "(" + ", ".join(sig_parts) + ")"
-
-
-def build_navigator_arguments_map(arguments_str, prefix):
-    """根据参数字符串构建 arguments map，如 '{FLXParams.url: url, FLXParams.title: title}'"""
-    params = parse_arguments_list(arguments_str)
-    if not params:
-        return ""
-
-    entries = []
-    for p in params:
-        entries.append(f'{prefix}Params.{p["name"]}: {p["name"]}')
-
-    return "{" + ", ".join(entries) + "}"
-
-
-def collect_all_argument_names(pages_list):
-    """收集所有页面的参数名，用于更新 FLXParams"""
-    all_names = set()
-    for page in pages_list:
-        if "arguments" in page:
-            params = parse_arguments_list(page["arguments"])
-            for p in params:
-                all_names.add(p["name"])
-    return sorted(all_names)
-
-
-def to_camel_case(name):
-    """将横线/下划线命名转换为驼峰命名"""
-    parts = name.replace("-", "_").split("_")
-    return "".join(p[0].upper() + p[1:] if len(p) > 1 else p[0].upper() for p in parts)
-
-
-def to_const_name(name):
-    """生成 path 常量名称（如 pathChatList）"""
-    return "path" + to_camel_case(name)
-
-
-def to_pascal_case(name):
-    """将横线命名转换为 PascalCase"""
-    parts = name.replace("-", "_").split("_")
-    return "".join(p[0].upper() + p[1:] if len(p) > 1 else p[0].upper() for p in parts)
-
-
-def get_page_dir(name, pages):
-    """根据路径推断页面目录 - 直接使用配置中的路径"""
-    for page in pages:
-        if page["name"] == name:
-            path = page["path"]
-            # 移除开头的 / 和页面名称，得到目录路径
-            # 例如: /keyboards/keyboard_detail -> keyboards
-            #      /me/settings -> me
-            #      /chat/chat_list -> chat
-            if path.startswith("/"):
-                path = path[1:]  # 移除开头的 /
-            # 分割路径，取第一部分作为目录（排除页面名称本身）
-            parts = path.split("/")
-            # 如果路径只有一层（如 "/profile"），直接使用
-            if len(parts) == 1:
-                return parts[0]
-            # 否则取除最后一层外的所有层作为目录
-            elif len(parts) > 1:
-                dir_path = "/".join(parts[:-1])
-                return dir_path
-    # 兜底：如果没找到匹配，使用名称的第一部分
-    return name.split("-")[0] if "-" in name else name
-
-
-def get_page_import_path(name, path):
-    """根据页面名称和路径生成 import 路径 - 直接使用配置中的路径"""
-    # 特殊处理 main_tab
-    if name == "main_tab":
-        return "pages/main_tab/main_tab_page.dart"
-    # 移除开头的 /
-    if path.startswith("/"):
-        path = path[1:]
-    # 将路径转换为文件路径
-    # 例如: keyboards/keyboard_detail -> pages/keyboards/keyboard_detail/keyboard_detail_page.dart
-    parts = path.split("/")
-    page_name = parts[-1]  # 最后一部分是页面名称
-    dir_path = "/".join(parts[:-1]) if len(parts) > 1 else page_name
-    return f"pages/{dir_path}/{page_name}/{page_name}_page.dart"
-
-
-def check_page_exists(name, pages):
-    """检查页面是否已存在"""
-    page_dir = get_page_dir(name, pages)
-    page_file = PAGES_DIR / page_dir / name / f"{name}_page.dart"
-    logic_file = PAGES_DIR / page_dir / name / f"{name}_logic.dart"
-    return page_file.exists() or logic_file.exists()
-
-
-def cmd_check(pages, tab_order, main_tab=None):
-    """检查命令 - 显示差异"""
-    print("页面配置检查：")
-    print("=" * 50)
-
-    new_count = 0
-    exists_count = 0
-
-    # main_tab 单独处理
-    if main_tab:
-        main_tab_file = PAGES_DIR / "main_tab" / "main_tab_page.dart"
-        if main_tab_file.exists():
-            print(f"\033[33m[既存]\033[0m main_tab ({main_tab})")
-            exists_count += 1
-        else:
-            print(f"\033[32m[新增]\033[0m main_tab ({main_tab})")
-            new_count += 1
-
-    for page in pages:
-        name = page["name"]
-        path = page["path"]
-        exists = check_page_exists(name, pages)
-
-        if exists:
-            print(f"\033[33m[既存]\033[0m {name} ({path})")
-            exists_count += 1
-        else:
-            print(f"\033[32m[新增]\033[0m {name} ({path})")
-            new_count += 1
-
-    print("=" * 50)
-    print(f"总计: {len(pages) + (1 if main_tab else 0)} | \033[32m新增 {new_count}\033[0m | \033[33m既存 {exists_count}\033[0m")
-
-
-def cmd_tree():
-    """tree 命令 - 显示文件结构"""
-    print("pages/")
-
-    def walk_dir(dir_path, prefix=""):
-        if not dir_path.exists():
-            return
-
-        items = sorted(dir_path.iterdir(), key=lambda x: (x.is_file(), x.name))
-        for i, item in enumerate(items):
-            is_last = i == len(items) - 1
-            current_prefix = "└── " if is_last else "├── "
-            next_prefix = "    " if is_last else "│   "
-
-            if item.is_dir():
-                print(f"{prefix}{current_prefix}{item.name}/")
-                # 检查是否包含 page.dart 或 logic.dart
-                page_files = list(item.glob("*_page.dart")) + list(item.glob("*_logic.dart"))
-                if page_files:
-                    for pf in page_files:
-                        pf_prefix = "└── " if pf == page_files[-1] and not any(
-                            f.is_dir() for f in item.iterdir() if f != pf
-                        ) else "├── "
-                        print(f"{prefix}{next_prefix}{pf_prefix}{pf.name}")
-                walk_dir(item, prefix + next_prefix)
-
-    walk_dir(PAGES_DIR)
-
-
-def generate_page(page, pages):
-    """生成单个页面文件"""
-    name = page["name"]
-    page_dir = get_page_dir(name, pages)
-    target_dir = PAGES_DIR / page_dir / name
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    # 读取模板
-    with open(TEMPLATES_DIR / "page.dart.tmpl", "r", encoding="utf-8") as f:
-        page_template = f.read()
-    with open(TEMPLATES_DIR / "logic.dart.tmpl", "r", encoding="utf-8") as f:
-        logic_template = f.read()
-
-    # 替换占位符
-    pascal_name = to_pascal_case(name)
-    page_content = page_template.replace("{name}", name).replace("{Name}", pascal_name).replace("{package}", PACKAGE_NAME)
-    logic_content = logic_template.replace("{name}", name).replace("{Name}", pascal_name).replace("{package}", PACKAGE_NAME)
-
-    # 替换前缀占位符
-    page_content = apply_template_all_placeholder(page_content, CLASS_PREFIX)
-    logic_content = apply_template_all_placeholder(logic_content, CLASS_PREFIX)
-
-    # 写入文件
-    page_file = target_dir / f"{name}_page.dart"
-    logic_file = target_dir / f"{name}_logic.dart"
-
-    page_file.write_text(page_content, encoding="utf-8")
-    logic_file.write_text(logic_content, encoding="utf-8")
-
-    return page_file, logic_file
-
-
-def generate_main_tab_page(tab_order, pages_config):
-    """生成 main_tab_page.dart 内容"""
-    # 读取模板
-    template_file = TEMPLATES_DIR / "main_tab_page.dart.tmpl"
-    if not template_file.exists():
-        print("\033[33m[警告]\033[0m main_tab_page.dart.tmpl 模板不存在，使用默认模板")
-        return None
-
-    template = template_file.read_text(encoding="utf-8")
-
-    # 构建 tab 名称到配置信息的映射
-    pages_map = {p["name"]: p for p in pages_config}
-
-    # 生成 imports
-    imports = []
-    indexed_pages = []
-    tab_items = []
-
-    for idx, tab_name in enumerate(tab_order):
-        if tab_name not in pages_map:
-            continue
-
-        page_info = pages_map[tab_name]
-        path = page_info["path"]
-
-        # 生成 Page 类名
-        page_class = f"{CLASS_PREFIX}{to_pascal_case(tab_name)}Page"
-
-        # 生成 import 路径
-        import_path = get_page_import_path(tab_name, path)
-        import_line = f"import 'package:{PACKAGE_NAME}/{import_path}';"
-        if import_line not in imports:
-            imports.append(import_line)
-
-        # 添加到 IndexedStack
-        indexed_pages.append(f"{page_class}()")
-
-        # 生成 Tab 项（统一使用 home 图标，label 使用 tab_name）
-        tab_item = f"                  _buildTabItem(icon: Icons.home_outlined, activeIcon: Icons.home, label: '{tab_name}', index: {idx}),"
-        tab_items.append(tab_item)
-
-    # 替换模板占位符
-    content = template.replace("{package}", PACKAGE_NAME)
-    content = content.replace("{prefix}", CLASS_PREFIX)
-    content = content.replace("{page_imports}", "\n".join(imports))
-    content = content.replace("{indexed_stack_pages}", ", ".join(indexed_pages))
-    content = content.replace("{tab_items}", "\n".join(tab_items))
-
-    return content
-
-
-def cmd_generate(pages, tab_order, main_tab=None):
-    """generate 命令 - 生成页面"""
-    new_count = 0
-    skip_count = 0
-
-    # main_tab 单独处理
-    if main_tab:
-        main_tab_file = PAGES_DIR / "main_tab" / "main_tab_page.dart"
-        if main_tab_file.exists():
-            print(f"\033[33m[既存]\033[0m main_tab ({main_tab})")
-            skip_count += 1
-        else:
-            # 生成 main_tab 文件
-            target_dir = PAGES_DIR / "main_tab"
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            # 生成 main_tab_page.dart
-            main_tab_content = generate_main_tab_page(tab_order, pages)
-            if main_tab_content:
-                main_tab_page_file = target_dir / "main_tab_page.dart"
-                main_tab_page_file.write_text(main_tab_content, encoding="utf-8")
-
-            # 生成 main_tab_logic.dart（使用 main_tab 专用模板）
-            with open(TEMPLATES_DIR / "main_tab_logic.dart.tmpl", "r", encoding="utf-8") as f:
-                logic_template = f.read()
-            # 替换枚举占位符
-            enum_values = ", ".join(tab_order)
-            enum_code = f"\nenum MainTab {{ {enum_values} }}\n"
-            logic_template = logic_template.replace("{enum_code}", enum_code)
-            # 替换 index_body 占位符
-            logic_template = logic_template.replace("{index_body}", "    currentIndex.value = index;\n")
-            logic_content = apply_template_all_placeholder(logic_template, CLASS_PREFIX)
-
-            main_tab_logic_file = target_dir / "main_tab_logic.dart"
-            main_tab_logic_file.write_text(logic_content, encoding="utf-8")
-
-            print(f"\033[32m[新增]\033[0m main_tab ({main_tab})")
-            new_count += 1
-
-    for page in pages:
-        name = page["name"]
-        path = page["path"]
-        exists = check_page_exists(name, pages)
-
-        if exists:
-            # 跳过已存在的页面
-            print(f"\033[33m[既存]\033[0m {name} ({path})")
-            skip_count += 1
-        else:
-            # 新增 - 自动执行
-            generate_page(page, pages)
-            print(f"\033[32m[新增]\033[0m {name} ({path})")
-            new_count += 1
-
-    print(f"\n完成: \033[32m新增 {new_count}\033[0m | \033[33m既存 {skip_count}\033[0m")
-
-
-def update_route_config_path(pages, main_tab=None, verbose=False):
-    """更新 route_config.path.dart"""
-    if not ROUTE_PATH_FILE.exists():
-        return 0, 0
-
-    content = ROUTE_PATH_FILE.read_text(encoding="utf-8")
-
-    # 提取现有路径（只匹配 static const）
-    existing = {}
-    for match in re.findall(r'static const (path\w+) = [\'"](.*?)[\'"];', content):
-        const_name, path = match
-        existing[const_name] = path
-
-    def get_last_path_segment(path):
-        """获取路径的最后一段，如 /keyboards/keyboard_detail/:id -> /keyboard_detail/:id"""
-        if not path:
-            return path
-        # 直接返回完整路径，不需要截取
-        return path
-
-    # 生成新路径配置
-    new_entries = []
-    skip_entries = []
-    for page in pages:
-        name = page["name"]
-        path = page["path"]
-        const_name = to_const_name(name)
-        short_path = get_last_path_segment(path)
-        # 检查是否已存在（同名且同路径）
-        if const_name in existing and existing[const_name] == short_path:
-            if verbose:
-                skip_entries.append((name, short_path))
-        else:
-            new_entries.append((name, short_path, const_name))
-
-    # 添加 main_tab 路由
-    if main_tab:
-        if "pathMainTab" in existing:
-            if verbose:
-                skip_entries.append(("main_tab", main_tab))
-        else:
-            new_entries.append(("main_tab", main_tab, "pathMainTab"))
-
-    # 输出详情
-    if verbose:
-        for name, path in skip_entries:
-            print(f"\033[33m[既存]\033[0m path.{to_const_name(name)} = '{path}'")
-        for name, path, const_name in new_entries:
-            print(f"\033[32m[新增]\033[0m path.{const_name} = '{path}'")
-
-    if not new_entries:
-        return 0, len(skip_entries)
-
-    # 生成插入代码（不再分组，直接按顺序添加）
-    insert_lines = []
-    for name, path, const_name in new_entries:
-        insert_lines.append(f'  static const {const_name} = \'{path}\';')
-
-    insert_text = "\n".join(insert_lines)
-
-    # 在最后一个 static const 后插入（在 } 前）
-    if re.search(r'static const path\w+', content):
-        new_content = re.sub(
-            r'(  static const path\w+ = [\'"][^\'"]+[\'"];[\s\n]*)(?=\})',
-            rf'\1{insert_text}\n',
-            content
+                modifier = None  # positional
+
+            params.append((pname.strip(), ptype.strip(), default, modifier))
+
+        return params
+
+
+class GenConfig:
+    """完整配置"""
+    def __init__(self, config_path: str):
+        raw = json.loads(read_text(config_path))
+
+        self.pages: List[PageEntry] = []
+        for entry in raw.get("pages", []):
+            self.pages.append(parse_page_entry(entry))
+        self.tab_order = raw.get("tabOrder", [])
+        self.type_imports = raw.get("typeImports", {})
+        self.extra_params: Dict[str, str] = raw.get("extraParams", {})
+
+    @property
+    def all_pages(self) -> List[PageEntry]:
+        return self.pages
+
+
+def parse_page_entry(raw) -> PageEntry:
+    """解析 page 条目 (字符串或对象格式)"""
+    if isinstance(raw, str):
+        return parse_page_string(raw)
+    elif isinstance(raw, dict):
+        return PageEntry(
+            name=raw["name"],
+            path=raw["path"],
+            navigator=raw.get("navigator", "toNamed"),
+            arguments=raw.get("arguments"),
+            transition=raw.get("transition", "rightToLeft"),
         )
     else:
-        new_content = re.sub(
-            r'(\}\s*)$',
-            f'{insert_text}\n\\1',
-            content
-        )
-
-    ROUTE_PATH_FILE.write_text(new_content, encoding="utf-8")
-    return len(new_entries), len(skip_entries)
+        raise ValueError(f"Unknown page entry format: {raw}")
 
 
-def update_route_config_pages(pages, main_tab=None, verbose=False):
-    """更新 route_config.pages.dart"""
-    if not ROUTE_PAGES_FILE.exists():
-        return 0, 0
+def parse_page_string(s: str) -> PageEntry:
+    """
+    解析字符串格式: "splash /auth/splash"
+    或带注解: "splash /auth/splash @navigator(offAllNamed)"
+    或带参数: "report /me/report @arguments(String targetType, int targetId, ...)"
+    可同时带多个注解。
+    """
+    # 先提取注解
+    navigator = "toNamed"
+    arguments = None
+    transition = "rightToLeft"
 
-    pages_content = ROUTE_PAGES_FILE.read_text(encoding="utf-8")
-    config_content = None
-    config_file = PROJECT_ROOT / "lib" / "routes" / "route_config.dart"
+    # 匹配 @navigator(...)
+    nav_match = re.search(r"@navigator\(([^)]+)\)", s)
+    if nav_match:
+        navigator = nav_match.group(1).strip()
+        s = s[:nav_match.start()] + s[nav_match.end():]
 
-    if config_file.exists():
-        config_content = config_file.read_text(encoding="utf-8")
+    # 匹配 @transition(...)
+    tran_match = re.search(r"@transition\(([^)]+)\)", s)
+    if tran_match:
+        transition = tran_match.group(1).strip()
+        s = s[:tran_match.start()] + s[tran_match.end():]
 
-    # 按分组收集新条目
-    new_entries = []
-    skip_entries = []
-    for page in pages:
-        name = page["name"]
-        class_name = f"{CLASS_PREFIX}{to_pascal_case(name)}Page"
-        if class_name in pages_content:
-            const_name = to_const_name(name)
-            if verbose:
-                skip_entries.append((class_name, const_name))
-            continue
+    # 匹配 @arguments(...)
+    arg_match = re.search(r"@arguments\(([^)]+(?:\([^)]*\)[^)]*)*)\)", s)
+    if arg_match:
+        arguments = arg_match.group(1).strip()
+        s = s[:arg_match.start()] + s[arg_match.end():]
 
-        const_name = to_const_name(name)
-        new_entries.append((class_name, const_name))
+    # 剩余部分: "name /path"
+    parts = s.strip().split(None, 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid page string format: '{s}'. Expected 'name /path'")
 
-    # 添加 main_tab 页面
-    if main_tab:
-        if f"{CLASS_PREFIX}MainTabPage" in pages_content:
-            if verbose:
-                skip_entries.append((f"{CLASS_PREFIX}MainTabPage", "pathMainTab"))
-        else:
-            new_entries.insert(0, (f"{CLASS_PREFIX}MainTabPage", "pathMainTab"))
+    name = parts[0]
+    path = parts[1]
 
-    # 输出详情
-    if verbose:
-        for class_name, const_name in skip_entries:
-            print(f"\033[33m[既存]\033[0m {class_name}(name: RoutePath.{const_name})")
-        for class_name, const_name in new_entries:
-            print(f"\033[32m[新增]\033[0m {class_name}(name: RoutePath.{const_name})")
-
-    if not new_entries:
-        return 0, len(skip_entries)
-
-    # 生成插入代码（不再分组，直接按顺序添加）
-    insert_lines = []
-    for class_name, const_name in new_entries:
-        insert_lines.append(f'    {CLASS_PREFIX}GetPage(name: RoutePath.{const_name}, page: () => const {class_name}()),')
-
-    # 总是处理 imports（不管是否有新条目）
-    if config_content:
-        # 处理普通页面 imports
-        for page in pages:
-            name = page["name"]
-            import_path = get_page_import_path(name, page["path"])
-            import_line = f"import 'package:{PACKAGE_NAME}/{import_path}';\n"
-            # 检查 import 是否已存在
-            if import_line not in config_content:
-                config_content = import_line + config_content
-
-        # 处理 main_tab import
-        if main_tab:
-            main_tab_import = f"import 'package:{PACKAGE_NAME}/pages/main_tab/main_tab_page.dart';\n"
-            if main_tab_import not in config_content:
-                config_content = main_tab_import + config_content
-
-        config_file.write_text(config_content, encoding="utf-8")
-
-    insert_text = "\n".join(insert_lines)
-
-    # 在 getPages 列表最后一项后插入（在 ]; 前）
-    getpage_pattern = f"{CLASS_PREFIX}GetPage\\(name: RoutePath"
-    page_class_pattern = f"{CLASS_PREFIX}\\w+Page"
-    if re.search(getpage_pattern, pages_content):
-        pages_content = re.sub(
-            rf'(    {CLASS_PREFIX}GetPage\(name: RoutePath\.\w+, page: \(\) => const {page_class_pattern}\(\)\),[\s\n]*)(?=\n  \];)',
-            rf'\1{insert_text}\n',
-            pages_content
-        )
-    else:
-        pages_content = re.sub(
-            r'(\n  \];)',
-            f'\n{insert_text}\n\\1',
-            pages_content
-        )
-
-    ROUTE_PAGES_FILE.write_text(pages_content, encoding="utf-8")
-    return len(new_entries), len(skip_entries)
-
-
-def update_route_navigator(pages, main_tab=None, verbose=False):
-    """更新 route_navigator.dart"""
-    if not ROUTE_NAVIGATOR_FILE.exists():
-        return 0, 0
-
-    content = ROUTE_NAVIGATOR_FILE.read_text(encoding="utf-8")
-
-    # 忽略注释行（模板示例方法会被注释掉）
-    non_comment_lines = [line for line in content.split('\n') if not line.strip().startswith('//')]
-    non_comment_content = '\n'.join(non_comment_lines)
-
-    # 构建 name → page 映射，方便查 arguments
-    pages_map = {p["name"]: p for p in pages}
-
-    # 按分组收集新方法
-    new_entries = []
-    skip_entries = []
-    for page in pages:
-        name = page["name"]
-        const_name = to_const_name(name)
-        method_name = "go" + to_camel_case(name) + "Page"
-        arguments_str = page.get("arguments", None)
-
-        # 检查是否已存在（忽略注释行）
-        if f"{method_name}<" in non_comment_content:
-            if verbose:
-                skip_entries.append((method_name, const_name))
-            continue
-
-        new_entries.append((method_name, const_name, name, arguments_str))
-
-    # 添加 main_tab 方法（main_tab 不带 arguments）
-    if main_tab:
-        if "goMainTabPage<" in non_comment_content:
-            if verbose:
-                skip_entries.append(("goMainTabPage", "pathMainTab"))
-        else:
-            new_entries.insert(0, ("goMainTabPage", "pathMainTab", "main_tab", None))
-
-    # 输出详情
-    if verbose:
-        for method_name, const_name in skip_entries:
-            print(f"\033[33m[既存]\033[0m {method_name}()")
-        for method_name, const_name, name, args_str in new_entries:
-            sig = build_navigator_sig_from_args(args_str) if args_str else "()"
-            print(f"\033[32m[新增]\033[0m {method_name}{sig}")
-
-    if not new_entries:
-        return 0, len(skip_entries)
-
-    # 生成新方法代码（不再分组，直接按顺序添加）
-    new_methods = []
-    for method_name, const_name, name, arguments_str in new_entries:
-        if arguments_str:
-            sig = build_navigator_sig_from_args(arguments_str)
-            args_map = build_navigator_arguments_map(arguments_str, CLASS_PREFIX)
-            new_methods.append(f'  Future<T?> {method_name}<T>{sig} =>\n      _getToNamed<T>(RoutePath.{const_name}, arguments: {args_map});')
-        else:
-            new_methods.append(f'  Future<T?> {method_name}<T>() => _getToNamed<T>(RoutePath.{const_name});')
-
-    methods_text = "\n".join(new_methods)
-    # 在类末尾闭合前插入
-    content = re.sub(
-        r'(\n\}[\s]*\Z)',
-        f'\n{methods_text}\n\\1',
-        content
+    return PageEntry(
+        name=name,
+        path=path,
+        navigator=navigator,
+        arguments=arguments,
+        transition=transition,
     )
 
-    ROUTE_NAVIGATOR_FILE.write_text(content, encoding="utf-8")
-    return len(new_entries), len(skip_entries)
+
+def load_package() -> str:
+    cfg = json.loads(read_text(GEN_CONFIG_FILE))
+    return cfg["package"]
 
 
-def update_main_tab_logic(tab_order):
-    """更新 main_tab_logic.dart - 生成 Tab 枚举，替换模板占位符"""
-    if not MAIN_TAB_LOGIC_FILE.exists():
+def load_prefix() -> str:
+    cfg = json.loads(read_text(GEN_CONFIG_FILE))
+    return cfg["prefix"]
+
+
+# ============================================================
+# 模板引擎
+# ============================================================
+
+
+def render_template(tmpl_name: str, **kwargs) -> str:
+    path = os.path.join(TEMPLATE_DIR, tmpl_name)
+    tmpl = read_text(path)
+    for key, value in kwargs.items():
+        tmpl = tmpl.replace("{" + key + "}", value)
+    return tmpl
+
+
+def render_route_path_g(config: GenConfig, prefix: str) -> str:
+    """生成 route_config.path.g.dart"""
+    entries = []
+    for page in config.pages:
+        const_name = "path" + snake_to_pascal(page.name)
+        entries.append(f"  static const String {const_name} = '{page.path}';")
+    paths = "\n".join(entries)
+    return render_template("route_config.path.g.dart.tmpl", paths=paths)
+
+
+def render_route_pages_g(config: GenConfig, prefix: str) -> str:
+    """生成 route_config.pages.g.dart"""
+    entries = []
+    for page in config.pages:
+        page_class = page.page_class(prefix)
+        route_const = page.route_const()
+        entries.append(
+            f"    {prefix}GetPage("
+            f"\n      name: RoutePath.{route_const},"
+            f"\n      page: () => {page_class}(),"
+            f"\n      transition: Transition.{page.transition},"
+            f"\n    ),"
+        )
+
+    pages = "\n".join(entries)
+    return render_template("route_config.pages.g.dart.tmpl", pages=pages)
+
+
+def render_route_navigator_g(config: GenConfig, prefix: str) -> str:
+    """生成 route_navigator.g.dart (Extension)"""
+    methods = []
+
+    for page in config.pages:
+        method_name = page.navigator_method_name()
+        route_const = page.route_const()
+        inner_method = page.navigator_method()
+        params = page.parse_arguments()
+
+        # 构建方法签名: 位置参数在前, 命名参数在 { } 中
+        pos_parts = []
+        named_parts = []
+        if params:
+            for pname, ptype, default, modifier in params:
+                if modifier is None:  # 位置参数
+                    pos_parts.append(f"{ptype} {pname}")
+                elif modifier == "required" and default is None:
+                    named_parts.append(f"required {ptype} {pname}")
+                elif default is not None:
+                    named_parts.append(f"{ptype} {pname} = {default}")
+                else:
+                    # 避免 ptype 已有 ? 时重复 (如 String? → String??)
+                    qt = ptype if ptype.endswith("?") else f"{ptype}?"
+                    named_parts.append(f"{qt} {pname}")
+
+        sig_parts = pos_parts
+        if named_parts:
+            sig_parts.append("{" + ", ".join(named_parts) + "}")
+        sig = ", ".join(sig_parts)
+
+        # 构建 arguments map
+        if params:
+            arg_parts = []
+            for pname, ptype, default, modifier in params:
+                arg_parts.append(f"{prefix}Params.{pname}: {pname}")
+            args_map = "{" + ", ".join(arg_parts) + "}"
+            methods.append(
+                f"  Future<T?> {method_name}<T>({sig}) =>\n"
+                f"      {inner_method}<T>(RoutePath.{route_const}, arguments: {args_map});"
+            )
+        else:
+            methods.append(
+                f"  Future<T?> {method_name}<T>() =>\n"
+                f"      {inner_method}<T>(RoutePath.{route_const});"
+            )
+
+    methods_text = "\n\n".join(methods)
+    return render_template("route_navigator.g.dart.tmpl",
+                           prefix=prefix,
+                           methods=methods_text)
+
+
+def render_page_params_g(config: GenConfig, prefix: str) -> str:
+    """生成 page_params.g.dart"""
+    # 收集所有页面的参数名
+    param_set: Dict[str, str] = {}
+    for page in config.pages:
+        for pname, ptype, default, modifier in page.parse_arguments():
+            if pname not in param_set:
+                param_set[pname] = ptype
+
+    # 加入 extraParams (手动声明的额外参数)
+    for pname, ptype in config.extra_params.items():
+        param_set[pname] = ptype
+
+    entries = []
+    for pname, ptype in param_set.items():
+        entries.append(f"  static const String {pname} = '{pname}';  // {ptype}")
+
+    params = "\n".join(entries)
+    return render_template("page_params.g.dart.tmpl",
+                           prefix=prefix,
+                           params=params)
+
+
+def build_page_imports(config: GenConfig, prefix: str) -> str:
+    """生成所有页面 import 语句"""
+    lines = []
+    for page in config.pages:
+        lines.append(page.import_statement(prefix))
+    return "\n".join(lines)
+
+
+# ============================================================
+# 路由文件操作
+# ============================================================
+
+
+AUTO_IMPORT_START = "// === AUTO_IMPORT_START ==="
+AUTO_IMPORT_END = "// === AUTO_IMPORT_END ==="
+
+
+def update_route_config_imports(config: GenConfig, prefix: str):
+    """更新 route_config.dart 中的 AUTO_IMPORT 区域"""
+    path = os.path.join(ROUTES_DIR, "route_config.dart")
+    if not os.path.exists(path):
+        print(f"  ⚠ route_config.dart 不存在, 请先运行 init")
         return
 
-    content = MAIN_TAB_LOGIC_FILE.read_text(encoding="utf-8")
-    original_content = content
+    content = read_text(path)
+    imports_text = build_page_imports(config, prefix)
 
-    # 生成枚举
-    enum_values = ", ".join(tab_order)
-    enum_code = f"\nenum MainTab {{ {enum_values} }}\n"
-
-    # 1. 替换 {enum_code} 占位符（如果存在）
-    if "{enum_code}" in content:
-        content = content.replace("{enum_code}", enum_code)
-    elif "enum MainTab" not in content:
-        # 兜底：文件没有占位符也没有枚举，在第一个 import 后插入
-        content = re.sub(
-            r"(import 'package:get/get.dart';)",
-            rf'\1{enum_code}',
-            content
-        )
-
-    # 2. 替换 {index_body} 占位符（如果存在）
-    if "{index_body}" in content:
-        content = content.replace("{index_body}", "    currentIndex.value = index;\n")
-
-    # 3. 确保 switchTo 方法存在（插入在 switchTab 方法闭合 } 之后，而非方法体内部）
-    if "void switchTo" not in content:
-        switch_code = '''\n  void switchTo(MainTab tab) {
-    currentIndex.value = tab.index;
-  }
-'''
-        # 匹配 switchTab 方法整块，在其 } 后插入 switchTo
-        content = re.sub(
-            r'(  void switchTab\(int index\) \{.*?\n  \})',
-            rf'\1{switch_code}',
+    if AUTO_IMPORT_START in content and AUTO_IMPORT_END in content:
+        new_block = f"{AUTO_IMPORT_START}\n{imports_text}\n{AUTO_IMPORT_END}"
+        new_content = re.sub(
+            re.escape(AUTO_IMPORT_START) + r".*?" + re.escape(AUTO_IMPORT_END),
+            new_block,
             content,
-            flags=re.DOTALL
+            flags=re.DOTALL,
         )
-
-    if content != original_content:
-        MAIN_TAB_LOGIC_FILE.write_text(content, encoding="utf-8")
-        print(f"已更新 {MAIN_TAB_LOGIC_FILE.name}")
     else:
-        print(f"{MAIN_TAB_LOGIC_FILE.name} 无需更新")
-
-
-def update_page_params(pages):
-    """更新 page_params.dart - 自动维护 FLXParams 中的参数常量"""
-    if not PAGE_PARAMS_FILE.exists():
+        print("  ⚠ route_config.dart 中未找到 AUTO_IMPORT 标记, 跳过")
         return
 
-    # 收集所有页面参数名
-    param_names = collect_all_argument_names(pages)
-    if not param_names:
+    if new_content != content:
+        write_text(path, new_content)
+
+
+def ensure_part_directive(file_path: str, part_directive: str):
+    """确保文件中有某个 part 指令"""
+    if not os.path.exists(file_path):
         return
-
-    content = PAGE_PARAMS_FILE.read_text(encoding="utf-8")
-    original_content = content
-    new_consts = []
-
-    for name in param_names:
-        const_line = f'  static const {name} = \'{name}\';'
-        if const_line not in content:
-            new_consts.append(const_line)
-
-    if not new_consts:
+    content = read_text(file_path)
+    if part_directive in content:
         return
-
-    # 在 class {prefix}Params 的闭 } 前插入新常量
-    class_pattern = f"class {CLASS_PREFIX}Params"
-    if class_pattern in content:
-        # 找到 class 体的最后一个 }
-        # 使用非贪婪匹配到 class 体的末尾
-        content = re.sub(
-            rf'({class_pattern}.*?)(\n\}})',
-            rf'\1\n' + "\n".join(new_consts) + r'\2',
-            content,
-            flags=re.DOTALL
-        )
-
-    if content != original_content:
-        PAGE_PARAMS_FILE.write_text(content, encoding="utf-8")
-        new_names = [pn for pn in param_names if f'static const {pn}' not in original_content]
-        print(f"已更新 {PAGE_PARAMS_FILE.name}，新增参数: {', '.join(new_names)}")
+    # 在最后一个 part 后面插入
+    lines = content.split("\n")
+    last_part_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip().startswith("part "):
+            last_part_idx = i
+    if last_part_idx >= 0:
+        lines.insert(last_part_idx + 1, part_directive)
+        write_text(file_path, "\n".join(lines))
 
 
-def apply_package_placeholder(content):
-    """替换模板中的 {package} 占位符"""
-    return content.replace("{package}", PACKAGE_NAME)
+# ============================================================
+# 命令: init — 创建缺失的非 .g.dart 文件
+# ============================================================
 
 
-def cmd_init():
-    """init 命令 - 初始化路由配置文件"""
-    created = []
-    routes_dir = PROJECT_ROOT / "lib" / "routes"
-
-    # 确保 routes 目录存在
-    routes_dir.mkdir(parents=True, exist_ok=True)
+def cmd_init(config: GenConfig, prefix: str, package: str):
+    """创建缺失的非 .g.dart 路由文件"""
+    print("\n[init] 创建缺失的非 .g.dart 文件...")
 
     # route_config.dart
-    if not (routes_dir / "route_config.dart").exists():
-        template_file = TEMPLATES_DIR / "route_config.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "route_config.dart").write_text(content, encoding="utf-8")
-        else:
-            (routes_dir / "route_config.dart").write_text(
-                "import 'package:get/get.dart';\n\npart 'route_config.pages.dart';\npart 'route_config.path.dart';\n\nclass RouteConfig {\n  static final List<GetPage> getPages = RoutePages.getPages;\n}\n\nclass " + CLASS_PREFIX + "GetPage extends GetPage {\n  static const Duration transitionDurationNormal = Duration(milliseconds: 350);\n  " + CLASS_PREFIX + "GetPage({\n    required super.name,\n    required super.page,\n    super.transition = Transition.rightToLeft,\n    super.transitionDuration = transitionDurationNormal,\n    super.customTransition,\n    super.parameters,\n  });\n}\n",
-                encoding="utf-8"
-            )
-        created.append("route_config.dart")
-
-    # route_config.path.dart
-    if not (routes_dir / "route_config.path.dart").exists():
-        template_file = TEMPLATES_DIR / "route_config.path.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "route_config.path.dart").write_text(content, encoding="utf-8")
-        else:
-            (routes_dir / "route_config.path.dart").write_text(
-                "part of 'route_config.dart';\n\nclass RoutePath {\n}\n",
-                encoding="utf-8"
-            )
-        created.append("route_config.path.dart")
-
-    # route_config.pages.dart
-    if not (routes_dir / "route_config.pages.dart").exists():
-        template_file = TEMPLATES_DIR / "route_config.pages.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "route_config.pages.dart").write_text(content, encoding="utf-8")
-        else:
-            (routes_dir / "route_config.pages.dart").write_text(
-                "part of 'route_config.dart';\n\nclass RoutePages {\n  static final List<GetPage> getPages = [\n  ];\n}\n",
-                encoding="utf-8"
-            )
-        created.append("route_config.pages.dart")
+    dst = os.path.join(ROUTES_DIR, "route_config.dart")
+    if not os.path.exists(dst):
+        imports_text = build_page_imports(config, prefix)
+        content = render_template(
+            "route_config.dart.tmpl",
+            prefix=prefix,
+            imports=imports_text,
+        )
+        write_text(dst, content)
 
     # route_navigator.dart
-    if not (routes_dir / "route_navigator.dart").exists():
-        template_file = TEMPLATES_DIR / "route_navigator.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "route_navigator.dart").write_text(content, encoding="utf-8")
-        else:
-            (routes_dir / "route_navigator.dart").write_text(
-                "import 'package:{PACKAGE_NAME}/routes/route_config.dart';\nimport 'package:get/get.dart';\n\nclass Nav {\n}\n",
-                encoding="utf-8"
-            )
-        created.append("route_navigator.dart")
-
-    # route_navigator.util.dart
-    if not (routes_dir / "route_navigator.util.dart").exists():
-        template_file = TEMPLATES_DIR / "route_navigator.util.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "route_navigator.util.dart").write_text(content, encoding="utf-8")
-        else:
-            (routes_dir / "route_navigator.util.dart").write_text(
-                "part of 'route_navigator.dart';\n\nclass " + CLASS_PREFIX + "BaseNavigator {\n}\n",
-                encoding="utf-8"
-            )
-        created.append("route_navigator.util.dart")
+    dst = os.path.join(ROUTES_DIR, "route_navigator.dart")
+    if not os.path.exists(dst):
+        content = render_template(
+            "route_navigator.dart.tmpl",
+            prefix=prefix,
+            package=package,
+        )
+        write_text(dst, content)
 
     # route_navigator.native.dart
-    if not (routes_dir / "route_navigator.native.dart").exists():
-        template_file = TEMPLATES_DIR / "route_navigator.native.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "route_navigator.native.dart").write_text(content, encoding="utf-8")
-        else:
-            (routes_dir / "route_navigator.native.dart").write_text(
-                "part of 'route_navigator.dart';\n",
-                encoding="utf-8"
+    dst = os.path.join(ROUTES_DIR, "route_navigator.native.dart")
+    if not os.path.exists(dst):
+        content = render_template(
+            "route_navigator.native.dart.tmpl",
+            prefix=prefix,
+            package=package,
+        )
+        write_text(dst, content)
+
+    # route_navigator.utils.dart
+    dst = os.path.join(ROUTES_DIR, "route_navigator.utils.dart")
+    if not os.path.exists(dst):
+        content = render_template(
+            "route_navigator.utils.dart.tmpl",
+            prefix=prefix,
+        )
+        write_text(dst, content)
+
+    print("  init 完成")
+
+
+# ============================================================
+# 命令: routes — 全量覆盖 .g.dart 文件
+# ============================================================
+
+
+def cmd_routes(config: GenConfig, prefix: str, package: str):
+    """全量覆盖所有 .g.dart 路由文件 + 更新 AUTO_IMPORT"""
+    print("\n[routes] 全量覆盖 .g.dart 文件...")
+
+    os.makedirs(ROUTES_DIR, exist_ok=True)
+
+    # 1. route_config.path.g.dart
+    content = render_route_path_g(config, prefix)
+    write_text(os.path.join(ROUTES_DIR, "route_config.path.g.dart"), content)
+
+    # 2. route_config.pages.g.dart
+    content = render_route_pages_g(config, prefix)
+    write_text(os.path.join(ROUTES_DIR, "route_config.pages.g.dart"), content)
+
+    # 3. route_navigator.g.dart
+    content = render_route_navigator_g(config, prefix)
+    write_text(os.path.join(ROUTES_DIR, "route_navigator.g.dart"), content)
+
+    # 4. page_params.g.dart
+    content = render_page_params_g(config, prefix)
+    write_text(os.path.join(ROUTES_DIR, "page_params.g.dart"), content)
+
+    # 5. 更新 route_config.dart 中的 AUTO_IMPORT 区域
+    update_route_config_imports(config, prefix)
+
+    # 6. 确保 route_navigator.dart 有 part 指令
+    ensure_part_directive(
+        os.path.join(ROUTES_DIR, "route_navigator.dart"),
+        "part 'route_navigator.g.dart';",
+    )
+    ensure_part_directive(
+        os.path.join(ROUTES_DIR, "route_navigator.dart"),
+        "part 'route_navigator.utils.dart';",
+    )
+
+    print("  routes 完成")
+
+
+# ============================================================
+# 命令: pages — 补缺 page 文件
+# ============================================================
+
+
+def cmd_pages(config: GenConfig, prefix: str, package: str):
+    """创建缺失的 page 文件 (_page.dart 和 _logic.dart)"""
+    print("\n[pages] 补缺页面文件...")
+
+    for page in config.pages:
+        page_dir = os.path.join(PAGES_DIR, page.dir_path())
+        os.makedirs(page_dir, exist_ok=True)
+
+        page_file = os.path.join(page_dir, f"{page.file_name()}_page.dart")
+        if not os.path.exists(page_file):
+            content = render_template(
+                "page.dart.tmpl",
+                PageClass=page.page_class(prefix),
+                LogicClass=page.logic_class(prefix),
+                Prefix=prefix,
+                package=package,
+                name=page.file_name(),
             )
-        created.append("route_navigator.native.dart")
-
-    # page_params.dart
-    if not (routes_dir / "page_params.dart").exists():
-        template_file = TEMPLATES_DIR / "page_params.dart.tmpl"
-        if template_file.exists():
-            content = apply_template_all_placeholder(template_file.read_text(encoding="utf-8"), CLASS_PREFIX)
-            (routes_dir / "page_params.dart").write_text(content, encoding="utf-8")
+            write_text(page_file, content)
         else:
-            (routes_dir / "page_params.dart").write_text(
-                "import 'package:get/get.dart';\n\nclass " + CLASS_PREFIX + "Params {\n}\n",
-                encoding="utf-8"
+            print(f"  - {page.file_name()}_page.dart 已存在, 跳过")
+
+        logic_file = os.path.join(page_dir, f"{page.file_name()}_logic.dart")
+        if not os.path.exists(logic_file):
+            content = render_template(
+                "logic.dart.tmpl",
+                LogicClass=page.logic_class(prefix),
+                package=package,
             )
-        created.append("page_params.dart")
-
-    # main_tab_logic.dart
-    if not MAIN_TAB_LOGIC_FILE.exists():
-        template_file = TEMPLATES_DIR / "main_tab_logic.dart.tmpl"
-        if template_file.exists():
-            content = template_file.read_text(encoding="utf-8")
-            # 替换 {enum_code}：init 时用空 enum，后续 update_main_tab_logic() 会更新
-            content = content.replace("{enum_code}", "")
-            # 替换 {index_body}：默认行为
-            content = content.replace("{index_body}", "    currentIndex.value = index;\n")
-            content = apply_template_all_placeholder(content, CLASS_PREFIX)
+            write_text(logic_file, content)
         else:
-            content = "import 'package:get/get.dart';\n\nclass " + CLASS_PREFIX + "MainTabLogic extends GetxController {\n  final currentIndex = 0.obs;\n}\n"
+            print(f"  - {page.file_name()}_logic.dart 已存在, 跳过")
 
-        # 确保父目录存在
-        MAIN_TAB_LOGIC_FILE.parent.mkdir(parents=True, exist_ok=True)
-        MAIN_TAB_LOGIC_FILE.write_text(content, encoding="utf-8")
-        created.append(MAIN_TAB_LOGIC_FILE.name)
-
-    if created:
-        print("已创建文件：")
-        for f in created:
-            print(f"  - {f}")
-    else:
-        print("所有文件已存在，无需初始化")
+    print("  pages 完成")
 
 
-def cmd_routes():
-    """routes 命令 - 更新路由配置"""
-    # 确保路由文件存在，不存在则先初始化
-    routes_dir = PROJECT_ROOT / "lib" / "routes"
-    required_files = [
-        routes_dir / "route_config.dart",
-        routes_dir / "route_config.path.dart",
-        routes_dir / "route_config.pages.dart",
-        routes_dir / "route_navigator.dart",
-    ]
-    missing = [f for f in required_files if not f.exists()]
-    if missing:
-        print("检测到路由文件缺失，先执行初始化...")
-        cmd_init()
+# ============================================================
+# 命令: generate — 全流程
+# ============================================================
 
-    config = load_config()
-    pages = parse_pages(config.get("pages", []))
-    tab_order = config.get("tabOrder", [])
-    main_tab = config.get("main_tab", None)
 
-    print("路由配置更新：")
-    print("=" * 50)
+def cmd_generate(config: GenConfig, prefix: str, package: str):
+    cmd_pages(config, prefix, package)
+    cmd_routes(config, prefix, package)
 
-    # 统计并显示 path 更新
-    new_path, skip_path = update_route_config_path(pages, main_tab, verbose=True)
 
-    # 统计并显示 pages 更新
-    new_pages, skip_pages = update_route_config_pages(pages, main_tab, verbose=True)
+# ============================================================
+# 命令: migrate — 一次性迁移 (如果有旧文件)
+# ============================================================
 
-    # 统计并显示 navigator 更新
-    new_nav, skip_nav = update_route_navigator(pages, main_tab, verbose=True)
 
-    # main_tab_logic
-    update_main_tab_logic(tab_order)
+MIGRATION_MAP = {
+    "route_config.path.dart": "route_config.path.g.dart",
+    "route_config.pages.dart": "route_config.pages.g.dart",
+    "page_params.dart": "page_params.g.dart",
+    "route_navigator.util.dart": "route_navigator.utils.dart",
+}
 
-    # page_params 参数常量
-    update_page_params(pages)
-    
-    print("=" * 50)
-    print(f"路径常量: \033[32m新增 {new_path}\033[0m | \033[33m既存 {skip_path}\033[0m")
-    print(f"页面配置: \033[32m新增 {new_pages}\033[0m | \033[33m既存 {skip_pages}\033[0m")
-    print(f"导航方法: \033[32m新增 {new_nav}\033[0m | \033[33m既存 {skip_nav}\033[0m")
-    print("路由配置更新完成")
+
+def cmd_migrate():
+    """迁移旧的产物文件 → 新命名 (仅初次使用)"""
+    print("\n[migrate] 检查并迁移旧文件...")
+
+    for old, new in MIGRATION_MAP.items():
+        old_path = os.path.join(ROUTES_DIR, old)
+        new_path = os.path.join(ROUTES_DIR, new)
+        if os.path.exists(old_path):
+            if os.path.exists(new_path):
+                print(f"  ⚠ {old} > {new} (目标已存在, 保留旧文件: {old_path})")
+            else:
+                os.rename(old_path, new_path)
+                print(f"  ✓ {old} → {new}")
+
+    print("  migrate 完成")
+
+
+# ============================================================
+# Main
+# ============================================================
+
+
+USAGE = """
+用法:
+    python3 gen_pages.py generate      全流程: pages + routes
+    python3 gen_pages.py pages         只补缺 page 文件
+    python3 gen_pages.py routes        全量覆盖 .g.dart 路由文件
+    python3 gen_pages.py init          创建缺失的非 .g.dart 路由文件
+    python3 gen_pages.py migrate       迁移旧产物文件 → .g.dart 命名
+    python3 gen_pages.py help          显示 DSL 配置语言说明
+
+配置文件: scripts/gen_page_config.json / scripts/gen_config.json
+"""
+
+DSL_HELP = r"""
+=============================================================================
+gen_page_config.json DSL 配置语言说明
+=============================================================================
+
+[概览]
+  gen_page_config.json 是页面路由的 single source of truth。
+  执行 gen_pages.py 后根据此文件全量覆盖所有 *.g.dart 路由文件。
+
+-----------------------------------------------------------------------------
+一、两种页面条目格式
+-----------------------------------------------------------------------------
+
+  格式 A — 字符串（简洁版）:
+    "<name> <path> [@navigator(...)] [@arguments(...)] [@transition(...)]"
+
+  格式 B — 对象（完整版）:
+    {
+      "name": "<snake_case>",           // 必填，页面名
+      "path": "/<module>/<page>",        // 必填，路由路径 (snake_case)
+      "navigator": "toNamed",            // 可选，默认 "toNamed"
+      "transition": "rightToLeft",       // 可选，默认 "rightToLeft"
+      "arguments": null                  // 可选，见下
+    }
+
+  【命名规则】
+    - name: snake_case，如 avatar_hero, profile_edit
+      自动推导：
+        Page 类名  → FLX + PascalCase(name) + Page  (如 FLXAvatarHeroPage)
+        Logic 类名 → FLX + PascalCase(name) + Logic (如 FLXAvatarHeroLogic)
+    - path: 以 / 开头的 snake_case 路径，如 /profile/avatar_hero
+
+-----------------------------------------------------------------------------
+二、@navigator(...) — 导航方式
+-----------------------------------------------------------------------------
+
+  值              效果
+  ─────────────   ──────────────────────
+  toNamed         Get.toNamed（默认）
+  offAllNamed     Get.offAllNamed（清空路由栈）
+
+  示例:
+    "splash /auth/splash @navigator(offAllNamed)"
+
+-----------------------------------------------------------------------------
+三、@transition(...) — 页面转场动画
+-----------------------------------------------------------------------------
+
+  值为 Transition 枚举名（首字母大写 camelCase）:
+    fadeIn, rightToLeft, leftToRight, upToDown, downToUp,
+    rightToLeftWithFade, leftToRightWithFade, cupertino,
+    size, scale, rotate, noTransition, custom, ...
+
+  示例:
+    "main_tab /main_tab @transition(fadeIn)"
+
+-----------------------------------------------------------------------------
+四、@arguments(...) — 页面参数传递
+-----------------------------------------------------------------------------
+
+  子命令 run: gen_pages.py 在这里截断...
+
+  语法: @arguments( [required] Type name [=default], ... )
+
+  参数类型:
+    位置参数:    Type name          → goXxxPage(String url, ...)
+    命名参数:    { Type name }      → goXxxPage({String? name, ...})
+    必填命名:    { required Type name }  → goXxxPage({required String name, ...})
+    默认值命名:  { Type name = val }     → goXxxPage({String name = '', ...})
+
+  生成的导航方法示例:
+    // @arguments(String url, {String title = ''})
+    Future<T?> goWebPage<T>(String url, {String title = ''}) =>
+
+    // @arguments({required int userId, required String? nickname})
+    Future<T?> goAvatarHeroPage<T>({required int userId, required String? nickname}) =>
+
+  注意:
+    - 自定义类型需要在 gen_page_config.json 的 typeImports 中声明 import 路径
+    - 整个参数包裹在 {} 中 = 全部 named; 逐个 {}  = 单个 named
+
+-----------------------------------------------------------------------------
+五、typeImports — 自定义类型导入声明
+-----------------------------------------------------------------------------
+
+  当 @arguments 中使用了自定义类型（如 FLXPostItem），在此声明导入路径:
+
+    "typeImports": {
+      "FLXPostItem": "package:bondflow/common/net/models/json/post_model.dart"
+    }
+
+-----------------------------------------------------------------------------
+六、extraParams — 额外参数常量
+-----------------------------------------------------------------------------
+
+  非页面路由的参数（如全局参数），在此声明:
+
+    "extraParams": {
+      "scenarioResult": "FLXScenarioSubmitResp?",
+      "scenarioQuestions": "List?"
+    }
+
+-----------------------------------------------------------------------------
+七、tabOrder — TabBar 页签顺序（可选）
+-----------------------------------------------------------------------------
+
+    "tabOrder": ["discover", "mailbox", "pals", "me"]
+
+-----------------------------------------------------------------------------
+八、配套 gen_config.json — 全局配置
+-----------------------------------------------------------------------------
+
+    {
+      "prefix": "FLX",                        // 类名前缀
+      "package": "bondflow"                   // Dart 包名
+    }
+
+-----------------------------------------------------------------------------
+九、产物文件一览
+-----------------------------------------------------------------------------
+
+  命令         生成/更新                            覆盖策略
+  ─────────   ─────────────────────────────────   ──────────────
+  pages       各 page 的 _page.dart / _logic.dart   仅缺失时创建
+  routes      route_config.path.g.dart              全量覆盖
+              route_config.pages.g.dart              全量覆盖
+              route_navigator.g.dart                 全量覆盖
+              page_params.g.dart                     全量覆盖
+              route_config.dart (AUTO_IMPORT 区域)   仅替换标记区域
+  init        route_config.dart                     仅缺失时创建
+              route_navigator.dart                   仅缺失时创建
+              route_navigator.native.dart            仅缺失时创建
+              route_navigator.utils.dart             仅缺失时创建
+
+  说明:
+    - *.g.dart 文件每次 routes 命令全量覆盖，禁止手动编辑
+    - 非 .g.dart 路由文件只在缺失时创建，之后手动维护
+    - _page.dart / _logic.dart 只在缺失时创建，不会覆盖已有文件
+
+-----------------------------------------------------------------------------
+十、页面目录结构约定
+-----------------------------------------------------------------------------
+
+  path 格式               文件位置
+  ─────────────────────  ────────────────────────────────────
+  /auth/splash           lib/pages/auth/splash/splash_page.dart
+  /home                  lib/pages/home/home/home_page.dart   (单段路径追加 name)
+  /profile/avatar_hero   lib/pages/profile/avatar_hero/avatar_hero_page.dart
+
+=============================================================================
+"""
+
+
+def cmd_help():
+    print(DSL_HELP)
 
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python3 gen_pages.py <command>")
-        print("命令: check, pages, generate, tree, routes, init")
+        print(USAGE)
         sys.exit(1)
-    
-    command = sys.argv[1]
-    
-    if command == "init":
-        cmd_init()
-        
-    elif command == "routes":
-        cmd_routes()
-        
-    elif command == "check":
-        config = load_config()
-        pages = parse_pages(config.get("pages", []))
-        tab_order = config.get("tabOrder", [])
-        main_tab = config.get("main_tab", None)
-        cmd_check(pages, tab_order, main_tab)
-        
-    elif command == "tree":
-        cmd_tree()
-        
-    elif command == "pages":
-        # 原 generate 功能：只生成页面文件
-        config = load_config()
-        pages = parse_pages(config.get("pages", []))
-        tab_order = config.get("tabOrder", [])
-        main_tab = config.get("main_tab", None)
-        cmd_generate(pages, tab_order, main_tab)
-        
-    elif command == "generate":
-        # 新 generate 功能：routes + pages
-        print("生成页面文件...")
-        config = load_config()
-        pages = parse_pages(config.get("pages", []))
-        tab_order = config.get("tabOrder", [])
-        main_tab = config.get("main_tab", None)
-        cmd_generate(pages, tab_order, main_tab)
-        print()
-        print("更新路由配置...")
-        cmd_routes()
-        
+
+    cmd = sys.argv[1]
+
+    # -h / --help 等价于 help 命令
+    if cmd in ("-h", "--help", "help"):
+        cmd_help()
+        return
+
+    if cmd == "migrate":
+        cmd_migrate()
+        return
+
+    # 加载配置
+    config = GenConfig(CONFIG_FILE)
+    prefix = load_prefix()
+    package = load_package()
+
+    global PACKAGE
+    PACKAGE = package
+
+    if cmd == "init":
+        cmd_init(config, prefix, package)
+    elif cmd == "routes":
+        cmd_routes(config, prefix, package)
+    elif cmd == "pages":
+        cmd_pages(config, prefix, package)
+    elif cmd == "generate":
+        cmd_generate(config, prefix, package)
     else:
-        print(f"未知命令: {command}")
-        print("可用命令: check, pages, generate, tree, routes, init")
+        print(f"未知命令: {cmd}")
+        print(USAGE)
         sys.exit(1)
 
 
