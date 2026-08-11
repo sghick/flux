@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gen_pages.py — Bondflow 页面/路由代码生成器
+gen_pages.py — Talkfit 页面/路由代码生成器
 
 用法:
     python3 gen_pages.py generate          # 全流程: pages + routes
@@ -45,6 +45,38 @@ def write_text(path: str, content: str):
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"  ✓ {path}")
+
+
+def split_top_level(raw: str, sep: str = ",") -> List[str]:
+    """按分隔符切分参数列表，忽略 <> 和 {} 内的分隔符。"""
+    parts: List[str] = []
+    depth = 0          # 跟踪 <>
+    depth_brace = 0    # 跟踪 {}
+    current: List[str] = []
+    i = 0
+    while i < len(raw):
+        ch = raw[i]
+        if ch == "<":
+            depth += 1
+            current.append(ch)
+        elif ch == "{":
+            depth_brace += 1
+            current.append(ch)
+        elif ch == ">":
+            depth -= 1
+            current.append(ch)
+        elif ch == "}":
+            depth_brace -= 1
+            current.append(ch)
+        elif ch == sep and depth == 0 and depth_brace == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+        i += 1
+    if current:
+        parts.append("".join(current).strip())
+    return parts
 
 
 def snake_to_camel(s: str, first_upper: bool = True) -> str:
@@ -95,7 +127,7 @@ def page_name_to_page_import_dir(name: str, page_path: str) -> str:
 
 
 def page_name_to_page_import(name: str, page_path: str, prefix: str) -> str:
-    """页面 import 语句, 如 import 'package:bondflow/pages/auth/splash/splash_page.dart';
+    """页面 import 语句, 如 import 'package:talkfit/pages/auth/splash/splash_page.dart';
 
     路径模式:
       - 多段路径: pages/{path_stripped}/{page_name}_page.dart
@@ -189,7 +221,7 @@ class PageEntry:
             raw = raw[1:-1].strip()
 
         params = []
-        parts = re.split(r",\s*", raw)
+        parts = split_top_level(raw)
         for part in parts:
             part = part.strip()
             if not part:
@@ -199,42 +231,56 @@ class PageEntry:
             required = False
             default = None
 
-            # 非全局 named 时, 逐个参数可能自带 {}
+            # 非全局 named 时, 逐个参数可能自带 {} (可能含多个参数, 如 {int a = 0, String b})
             if not all_named and part.startswith("{") and part.endswith("}"):
-                named = True
-                part = part[1:-1].strip()
+                inner = part[1:-1].strip()
+                for sub in split_top_level(inner):
+                    _parse_single_param(params, sub, True)
+                continue
 
-            # 提取 required (前缀, 仅 named 参数)
-            if part.startswith("required "):
-                required = True
-                part = part[len("required "):].strip()
-
-            # 提取默认值
-            eq_match = re.match(r"^(.+?)\s*=\s*(.+)$", part)
-            if eq_match:
-                part = eq_match.group(1).strip()
-                default = eq_match.group(2).strip()
-                named = True  # 有默认值 → 必然是 named
-
-            # 分离 type 和 name
-            tokens = part.rsplit(None, 1)
-            if len(tokens) == 2:
-                ptype, pname = tokens
-            else:
-                ptype = "dynamic"
-                pname = tokens[0]
-
-            # 确定 modifier
-            if required:
-                modifier = "required"
-            elif named or default is not None:
-                modifier = "named"
-            else:
-                modifier = None  # positional
-
-            params.append((pname.strip(), ptype.strip(), default, modifier))
+            _parse_single_param(params, part, named)
 
         return params
+
+
+def _parse_single_param(params: List, raw_part: str, named: bool):
+    """解析单个参数并 append 到 params 列表."""
+    raw_part = raw_part.strip()
+    if not raw_part:
+        return
+
+    required = False
+    default = None
+
+    # 提取 required (前缀, 仅 named 参数)
+    if raw_part.startswith("required "):
+        required = True
+        raw_part = raw_part[len("required "):].strip()
+
+    # 提取默认值
+    eq_match = re.match(r"^(.+?)\s*=\s*(.+)$", raw_part)
+    if eq_match:
+        raw_part = eq_match.group(1).strip()
+        default = eq_match.group(2).strip()
+        named = True  # 有默认值 → 必然是 named
+
+    # 分离 type 和 name
+    tokens = raw_part.rsplit(None, 1)
+    if len(tokens) == 2:
+        ptype, pname = tokens
+    else:
+        ptype = "dynamic"
+        pname = tokens[0]
+
+    # 确定 modifier
+    if required:
+        modifier = "required"
+    elif named or default is not None:
+        modifier = "named"
+    else:
+        modifier = None  # positional
+
+    params.append((pname.strip(), ptype.strip(), default, modifier))
 
 
 class GenConfig:
@@ -786,7 +832,7 @@ gen_page_config.json DSL 配置语言说明
   当 @arguments 中使用了自定义类型（如 FLXPostItem），在此声明导入路径:
 
     "typeImports": {
-      "FLXPostItem": "package:bondflow/common/net/models/json/post_model.dart"
+      "FLXPostItem": "package:talkfit/common/net/models/json/post_model.dart"
     }
 
 -----------------------------------------------------------------------------
@@ -812,7 +858,7 @@ gen_page_config.json DSL 配置语言说明
 
     {
       "prefix": "FLX",                        // 类名前缀
-      "package": "bondflow"                   // Dart 包名
+      "package": "talkfit"                   // Dart 包名
     }
 
 -----------------------------------------------------------------------------
